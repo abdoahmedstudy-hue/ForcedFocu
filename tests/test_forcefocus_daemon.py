@@ -156,7 +156,9 @@ class TestForcedFocusDaemon(unittest.TestCase):
     @patch("forcefocus_daemon.logging.error")
     @patch("forcefocus_daemon.ForcedFocusDaemon._play_sound")
     @patch("forcefocus_daemon.SESSION_LOCK")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     def test_cleanup_session_error_handling(
+        self, mock_notif, mock_lock, mock_sound, mock_log_error, mock_run
         self, mock_lock, mock_sound, mock_log_error, mock_run, mock_notify
     ):
         self.daemon.active = True

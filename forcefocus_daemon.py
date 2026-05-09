@@ -1822,22 +1822,47 @@ class ForcedFocusDaemon:
         return "\n".join(result)
 
     def _send_mac_notification(self, title: str, message: str, subtitle: str = None):
+        """Send a macOS system notification via osascript using positional arguments for safety."""
         try:
-            safe_title = title.replace('"', '\\"')
-            safe_message = message.replace('"', '\\"')
-            script = f'display notification "{safe_message}" with title "{safe_title}"'
+            # We use positional arguments (argv) to prevent command injection.
+            # argv[1] = message, argv[2] = title, argv[3] = subtitle (if present)
+            
+            # Helper to generate the core notification logic
+            def get_notif_logic(wrapped_in_app: bool = False):
+                indent = "    " if wrapped_in_app else "  "
+                logic = f'{indent}set msg to item 1 of argv\n'
+                logic += f'{indent}set t to item 2 of argv\n'
+                logic += f'{indent}if (count of argv) is 3 then\n'
+                logic += f'{indent}  set sub to item 3 of argv\n'
+                logic += f'{indent}  display notification msg with title t subtitle sub sound name "Glass"\n'
+                logic += f'{indent}else\n'
+                logic += f'{indent}  display notification msg with title t sound name "Glass"\n'
+                logic += f'{indent}end if\n'
+
+                if wrapped_in_app:
+                    return f'  tell application "ForcedFocusBar"\n{logic}  end tell\n'
+                return logic
+
+            # script for fallback (direct notification)
+            script = f'on run argv\n{get_notif_logic(False)}end run'
+            
+            # app_script for primary attempt (linked with ForcedFocusBar)
+            app_script = f'on run argv\n{get_notif_logic(True)}end run'
+
+            args = [message, title]
             if subtitle:
-                safe_sub = subtitle.replace('"', '\\"')
-                script += f' subtitle "{safe_sub}"'
-            script += ' sound name "Glass"'
-            
+                args.append(subtitle)
+
             # Try to link with Mac Menu app
-            app_script = f'tell application "ForcedFocusBar" to {script}'
-            proc = subprocess.run(["osascript", "-e", app_script], capture_output=True, timeout=2)
-            
+            proc = subprocess.run(
+                ["osascript", "-e", app_script] + args, capture_output=True, timeout=2
+            )
+
             if proc.returncode != 0:
-                # Fallback
-                subprocess.run(["osascript", "-e", script], capture_output=True, timeout=2)
+                # Fallback to direct notification if the menu app is not running/available
+                subprocess.run(
+                    ["osascript", "-e", script] + args, capture_output=True, timeout=2
+                )
         except Exception as e:
             logging.error("Failed to send notification: %s", e)
 
