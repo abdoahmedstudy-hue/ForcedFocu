@@ -459,21 +459,23 @@ async function fetchSessionDomains() {
   }
 }
 
-async function syncBlockRules() {
+async function syncBlockRules(status = null) {
   // P4: Guard against cascading syncs from overlapping alarms
   if (syncInProgress) return;
   syncInProgress = true;
 
   try {
-    const status = await fetchSessionStatus();
+    if (!status) {
+      status = await fetchSessionStatus();
+    }
 
     // Reset connection attempts on successful fetch
     connectionAttempts = 0;
     if (isRetrying) {
       isRetrying = false;
       chrome.alarms.clear("syncRules");
-      chrome.alarms.create("syncRules", { periodInMinutes: 0.05 });
-      log("Server reconnected — restored fast polling.");
+      chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+      log("Server reconnected — restored background polling.");
     }
 
     // S3: Detect pomodoro phase transitions and broadcast to popup/content scripts
@@ -650,17 +652,42 @@ chrome.webNavigation.onErrorOccurred.addListener((details) => {
   }
 });
 
-// ── Extension Lifecycle ───────────────────────────────────────────────────────
+// ── Extension Lifecycle & IPC ──────────────────────────────────────────────────
+
+let eventSource = null;
+
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`${API}/api/stream`);
+  
+  eventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      syncBlockRules(data);
+    } catch (err) {
+      log(`SSE Parse Error: ${err.message}`, "error");
+    }
+  };
+  
+  eventSource.onerror = () => {
+    log("SSE connection lost. Reconnecting in 5s...", "warning");
+    eventSource.close();
+    eventSource = null;
+    setTimeout(connectSSE, 5000);
+  };
+}
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "syncRules") {
+    // If SSE is active, it handles updates. If disconnected, alarm is a fallback.
     syncBlockRules();
   }
 });
 
 chrome.runtime.onStartup.addListener(() => {
   log("Extension started");
-  chrome.alarms.create("syncRules", { periodInMinutes: 0.05 });
+  chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+  connectSSE();
   loadState().then(() => syncBlockRules());
 });
 
@@ -673,11 +700,13 @@ chrome.runtime.onInstalled.addListener((details) => {
       analytics = result.analytics;
     }
   });
-  chrome.alarms.create("syncRules", { periodInMinutes: 0.05 });
+  chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+  connectSSE();
   loadState().then(() => syncBlockRules());
 });
 
 // Also run immediately on service worker start (covers wakeup from suspension)
+connectSSE();
 loadState().then(() => syncBlockRules());
 
 // ── Message Handling ──────────────────────────────────────────────────────────

@@ -1190,19 +1190,41 @@ async function init() {
     els.scheduleAt.min = minVal;
   }
 
-  // Poll status every 2 seconds
-  pollInterval = setInterval(refreshStatus, 2000);
+  // Modernized IPC: Server-Sent Events (SSE) instead of aggressive polling
+  let eventSource = null;
 
-  // P4: Pause polling when tab is hidden to save resources
+  function connectSSE() {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource(API + "/api/stream");
+    
+    eventSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        updateUI(data);
+      } catch (err) {
+        console.error("SSE parse error:", err);
+      }
+    };
+    
+    eventSource.onerror = () => {
+      console.warn("SSE connection lost. Reconnecting in 3s...");
+      eventSource.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+
+  connectSSE();
+
+  // P4: Pause SSE when tab is hidden to save resources
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
       }
     } else {
       refreshStatus(); // Immediate sync on return
-      pollInterval = setInterval(refreshStatus, 2000);
+      connectSSE();
     }
   });
 }

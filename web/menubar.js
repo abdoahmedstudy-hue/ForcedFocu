@@ -622,8 +622,7 @@ window.onPopoverShow = () => {
   loadSettings();
   fetchGroups();
   refresh();
-  if (globalPollInterval) clearInterval(globalPollInterval);
-  globalPollInterval = setInterval(refresh, 2000);
+  connectSSE();
 };
 
 async function loadSettings() {
@@ -638,7 +637,7 @@ async function loadSettings() {
 }
 
 window.onPopoverHide = () => {
-  if (globalPollInterval) clearInterval(globalPollInterval);
+  // Keep SSE active to drive the native menubar countdown via nativeCallback
   if (countdownInterval) clearInterval(countdownInterval);
 };
 
@@ -649,5 +648,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadSettings();
   fetchGroups();
   refresh();
-  globalPollInterval = setInterval(refresh, 2000);
+  connectSSE();
 });
+
+let eventSource = null;
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(API + "/api/stream");
+  
+  eventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateUI(data);
+      if (window.webkit && window.webkit.messageHandlers.nativeCallback) {
+        window.webkit.messageHandlers.nativeCallback.postMessage({ action: "syncState", data: data });
+      }
+    } catch (err) {
+      console.error("SSE parse error:", err);
+    }
+  };
+  
+  eventSource.onerror = () => {
+    console.warn("SSE connection lost. Reconnecting in 3s...");
+    eventSource.close();
+    setTimeout(connectSSE, 3000);
+  };
+}

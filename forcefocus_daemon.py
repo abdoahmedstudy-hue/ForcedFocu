@@ -25,7 +25,7 @@ import mimetypes
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
 
@@ -520,6 +520,7 @@ class ForcedFocusDaemon:
     def __init__(self):
         self.active = False
         self.mode = "blacklist"
+        self.state_changed = threading.Event()
         self.active_domains: list[str] = []
         self.active_domains_set: set[str] = set()
         self.session_base_domains: list[str] = (
@@ -1051,6 +1052,7 @@ class ForcedFocusDaemon:
             if intent_tasks is not None:
                 self.intent_tasks = intent_tasks
             self._persist_session_lock()
+            self.state_changed.set()
             logging.info("Session intent updated.")
             return {"status": "ok", "message": "Intent updated."}
 
@@ -1312,6 +1314,7 @@ class ForcedFocusDaemon:
                 mode,
                 self.session_expiry.strftime("%H:%M:%S"),
             )
+            self.state_changed.set()
             return {
                 "status": "ok",
                 "message": msg,
@@ -1359,6 +1362,7 @@ class ForcedFocusDaemon:
             )
             self._mono_unlock_end = get_continuous_time() + DELAYED_UNLOCK_S
             self._persist_session_lock()
+            self.state_changed.set()
             unlock_str = self.pending_unlock_at.strftime("%H:%M:%S")
             logging.info("Delayed unlock requested — scheduled at %s.", unlock_str)
             return {
@@ -1950,7 +1954,7 @@ class ForcedFocusDaemon:
                 seconds=self.pomo_phase_remaining
             )
             self._mono_pomo_phase_end = (
-                get_continuous_time() + self.pomo_phase_remaining
+                get_continuous_time() + self.pomo_focus_minutes * 60
             )
             self._enforce_current_mode()
             self._persist_session_lock()
@@ -1964,6 +1968,7 @@ class ForcedFocusDaemon:
                 self.pomo_current_cycle,
                 self.pomo_total_cycles,
             )
+        self.state_changed.set()
 
     def _cleanup_session(self):
         logging.info("Cleaning up session (mode=%s)...", self.mode)
@@ -2023,6 +2028,9 @@ class ForcedFocusDaemon:
         self._mono_unlock_end = 0.0
         self._mono_pomo_phase_end = 0.0
         self._passphrase_attempts = 0
+        self.intent = None
+        self.intent_tasks = []
+        self.state_changed.set()
         # Do NOT clear schedules on session cleanup!
         logging.info("Session ended. Hosts restored. DNS flushed.")
 
@@ -2855,7 +2863,7 @@ class ForcedFocusDaemon:
             logging.error("HTTP server failed: %s", exc)
 
 
-class EmbeddedHTTPServer(HTTPServer):
+class EmbeddedHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_ref = None
     web_dir = WEB_DIR  # Default, overridden per-instance
@@ -2955,6 +2963,31 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
 
         if path == "/api/status":
             self._send_json(self.server.daemon_ref._get_status())
+        elif path == "/api/stream":
+            # Server-Sent Events (SSE) endpoint for real-time state updates
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", self._get_cors_origin())
+            self.end_headers()
+            
+            daemon = self.server.daemon_ref
+            try:
+                while True:
+                    # Send current status
+                    status_data = daemon._get_status()
+                    body = json.dumps(status_data)
+                    self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    
+                    # Wait for state change or max 1 second to pulse timer
+                    daemon.state_changed.wait(timeout=1.0)
+                    daemon.state_changed.clear()
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                # Client disconnected, perfectly normal
+                pass
+            return
         elif path == "/api/session-domains":
             self._send_json(self.server.daemon_ref._cmd_get_session_domains())
         elif path == "/api/lists":

@@ -84,14 +84,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
     }
     
     func scheduleTimer(interval: TimeInterval) {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(timeInterval: interval, target: self, selector: #selector(pollStatus), userInfo: nil, repeats: true)
-        timer?.tolerance = interval * 0.2
-        RunLoop.main.add(timer!, forMode: .common)
+        // Obsolete: SSE from WebView now drives state updates via nativeCallback
     }
     
     func popoverWillShow(_ notification: Notification) {
-        pollStatus()
         webView?.evaluateJavaScript("window.onPopoverShow && window.onPopoverShow()")
     }
     
@@ -155,30 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
     }
     
     @objc func pollStatus() {
-        guard let url = URL(string: "http://127.0.0.1:7070/api/status") else { return }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 2.0
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.handleOffline(error: error)
-                    return
-                }
-                
-                guard let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-                    self?.handleOffline(error: NSError(domain: "JSONParseError", code: 0, userInfo: nil))
-                    return
-                }
-                
-                self?.errorCount = 0
-                self?.updateStatusDisplay(json)
-                self?.adjustPollingRate(json)
-                self?.detectStateChanges(json)
-            }
-        }.resume()
+        // Obsolete: Replaced by JS SSE syncState
     }
     
     func handleOffline(error: Error) {
@@ -278,6 +251,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
                 if let title = data["title"] as? String,
                    let message = data["message"] as? String {
                     showNotification(title: title, message: message)
+                }
+            case "syncState":
+                if let stateData = data["data"] as? [String: Any] {
+                    errorCount = 0
+                    updateStatusDisplay(stateData)
+                    detectStateChanges(stateData)
                 }
             default:
                 break
