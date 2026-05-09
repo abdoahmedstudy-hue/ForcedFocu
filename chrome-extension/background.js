@@ -3,6 +3,12 @@
  * Actively blocks blacklisted domains at the browser level using
  * declarativeNetRequest, preventing bypass via Chrome's Secure DNS.
  * Includes analytics, retry logic, adaptive polling, and state persistence.
+ *
+ * Redirect Architecture (R1):
+ * DNR rules handle sub-resource blocking (block type) while webNavigation
+ * listeners handle main_frame redirects to blocked.html. This two-layer
+ * approach ensures redirects work even when /etc/hosts blocks the domain
+ * before DNR can fire (causing ERR_CONNECTION_REFUSED).
  */
 
 const API = "http://127.0.0.1:7070";
@@ -18,6 +24,11 @@ let lastPhase = null; // S3: Track pomodoro phase for change broadcasts
 let connectionAttempts = 0;
 let isRetrying = false;
 let syncInProgress = false; // P4: Guard against cascading syncs
+
+// R1: In-memory set of currently blocked domains for O(1) webNavigation lookups
+let blockedDomainsSet = new Set();
+// R1: Current blocking mode — "blacklist", "whitelist", "rescue", or null
+let currentBlockMode = null;
 
 // Analytics
 let analytics = {
@@ -42,10 +53,17 @@ async function loadState() {
       "lastActive",
       "lastMode",
       "lastPhase",
+      "blockedDomains",
+      "currentBlockMode",
     ]);
     lastActive = result.lastActive || false;
     lastMode = result.lastMode || null;
     lastPhase = result.lastPhase || null;
+    // R1: Restore blocked domains set from storage (survives SW suspension)
+    if (result.blockedDomains && Array.isArray(result.blockedDomains)) {
+      blockedDomainsSet = new Set(result.blockedDomains);
+    }
+    currentBlockMode = result.currentBlockMode || null;
   } catch (e) {
     // storage.session may not be available in older Chrome versions
     console.warn("[ForcedFocus] Could not load session state:", e);
@@ -54,7 +72,14 @@ async function loadState() {
 
 async function saveState() {
   try {
-    await chrome.storage.session.set({ lastActive, lastMode, lastPhase });
+    await chrome.storage.session.set({
+      lastActive,
+      lastMode,
+      lastPhase,
+      // R1: Persist blocked domains (capped at 5000 to avoid storage limits)
+      blockedDomains: [...blockedDomainsSet].slice(0, 5000),
+      currentBlockMode,
+    });
   } catch (e) {
     // Non-critical — state will just be re-synced on next poll
   }
@@ -100,6 +125,76 @@ async function fetchWithRetry(
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
     }
   }
+}
+
+// ── Domain Matching (R1) ──────────────────────────────────────────────────────
+
+/**
+ * Extract the hostname from a URL string.
+ * Returns lowercase hostname or null if parsing fails.
+ */
+function extractHostname(urlString) {
+  try {
+    const url = new URL(urlString);
+    return url.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a hostname is blocked by comparing against the blocked domains set.
+ * Handles subdomain matching: if "reddit.com" is blocked, "www.reddit.com" matches.
+ */
+function isHostnameBlocked(hostname) {
+  if (!hostname || blockedDomainsSet.size === 0) return false;
+
+  // Direct match
+  if (blockedDomainsSet.has(hostname)) return true;
+
+  // Walk up the domain hierarchy for subdomain matching
+  // e.g., "old.reddit.com" → check "reddit.com" → check "com"
+  const parts = hostname.split(".");
+  for (let i = 1; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join(".");
+    if (blockedDomainsSet.has(parent)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a URL should be blocked.
+ * Excludes extension URLs, localhost, and chrome:// pages.
+ */
+function shouldBlockUrl(urlString) {
+  if (!urlString) return false;
+
+  // Never block extension pages, chrome internals, or localhost
+  if (
+    urlString.startsWith("chrome") ||
+    urlString.startsWith("about:") ||
+    urlString.startsWith("chrome-extension://") ||
+    urlString.startsWith("http://127.0.0.1") ||
+    urlString.startsWith("http://localhost")
+  ) {
+    return false;
+  }
+
+  const hostname = extractHostname(urlString);
+  if (!hostname) return false;
+
+  if (currentBlockMode === "blacklist") {
+    // Blacklist: block if domain is in the set
+    return isHostnameBlocked(hostname);
+  } else if (currentBlockMode === "whitelist" || currentBlockMode === "rescue") {
+    // Whitelist/Rescue: block if domain is NOT in the allowed set
+    // For rescue mode, blockedDomainsSet is empty (nothing allowed)
+    if (hostname === "127.0.0.1" || hostname === "localhost") return false;
+    return !isHostnameBlocked(hostname);
+  }
+
+  return false;
 }
 
 // ── Browser Cache Management ──────────────────────────────────────────────────
@@ -168,8 +263,8 @@ async function updateDynamicRules(addRules = [], removeRuleIds = []) {
 
 // ── Block Rule Generation ─────────────────────────────────────────────────────
 
-const ALL_RESOURCE_TYPES = [
-  "main_frame",
+// R1: Sub-resource types — these get "block" action (redirect doesn't work for these)
+const SUB_RESOURCE_TYPES = [
   "sub_frame",
   "stylesheet",
   "script",
@@ -185,11 +280,15 @@ const ALL_RESOURCE_TYPES = [
   "other",
 ];
 
+// R1: Main frame type — gets "redirect" action to blocked.html
+const MAIN_FRAME_TYPES = ["main_frame"];
+
 function generateBlockRules(domains) {
   const rules = [];
   let id = RULE_ID_START;
 
   for (const domain of domains) {
+    // R1: Main frame navigations → redirect to blocked.html
     rules.push({
       id: id++,
       priority: 1,
@@ -204,7 +303,18 @@ function generateBlockRules(domains) {
       },
       condition: {
         urlFilter: `||${domain}`,
-        resourceTypes: ALL_RESOURCE_TYPES,
+        resourceTypes: MAIN_FRAME_TYPES,
+      },
+    });
+
+    // R1: Sub-resources → block silently (redirect doesn't work for these in MV3)
+    rules.push({
+      id: id++,
+      priority: 1,
+      action: { type: "block" },
+      condition: {
+        urlFilter: `||${domain}`,
+        resourceTypes: SUB_RESOURCE_TYPES,
       },
     });
   }
@@ -216,7 +326,7 @@ function generateWhitelistRules(allowedDomains) {
   const rules = [];
   let id = RULE_ID_START;
 
-  // Block everything by default
+  // R1: Block all main_frame navigations by default → redirect to blocked.html
   rules.push({
     id: id++,
     priority: 1,
@@ -228,7 +338,19 @@ function generateWhitelistRules(allowedDomains) {
     },
     condition: {
       urlFilter: "*",
-      resourceTypes: ALL_RESOURCE_TYPES,
+      resourceTypes: MAIN_FRAME_TYPES,
+      excludedInitiatorDomains: [chrome.runtime.id],
+    },
+  });
+
+  // R1: Block all sub-resources by default → silent block
+  rules.push({
+    id: id++,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      urlFilter: "*",
+      resourceTypes: SUB_RESOURCE_TYPES,
       excludedInitiatorDomains: [chrome.runtime.id],
     },
   });
@@ -241,7 +363,7 @@ function generateWhitelistRules(allowedDomains) {
       action: { type: "allow" },
       condition: {
         urlFilter: `||${domain}`,
-        resourceTypes: ALL_RESOURCE_TYPES,
+        resourceTypes: [...MAIN_FRAME_TYPES, ...SUB_RESOURCE_TYPES],
       },
     });
   }
@@ -254,7 +376,7 @@ function generateWhitelistRules(allowedDomains) {
       action: { type: "allow" },
       condition: {
         urlFilter: `||${host}`,
-        resourceTypes: ALL_RESOURCE_TYPES,
+        resourceTypes: [...MAIN_FRAME_TYPES, ...SUB_RESOURCE_TYPES],
       },
     });
   });
@@ -287,13 +409,19 @@ async function applyBlockRules(domains) {
   }
   const rules = generateBlockRules(domains);
   await updateDynamicRules(rules);
-  log(`Applied ${rules.length} block rules.`);
+  // R1: Update in-memory blocked domains set for webNavigation matching
+  blockedDomainsSet = new Set(domains.map((d) => d.toLowerCase()));
+  currentBlockMode = "blacklist";
+  log(`Applied ${rules.length} block rules for ${domains.length} domains.`);
 }
 
 async function applyWhitelistRules(allowedDomains) {
   await clearBlockRules();
   const rules = generateWhitelistRules(allowedDomains);
   await updateDynamicRules(rules);
+  // R1: For whitelist, the set contains ALLOWED domains
+  blockedDomainsSet = new Set(allowedDomains.map((d) => d.toLowerCase()));
+  currentBlockMode = "whitelist";
   log(
     `Applied whitelist rules: ${allowedDomains.length} allowed, rest blocked.`,
   );
@@ -377,6 +505,8 @@ async function syncBlockRules() {
     ) {
       if (lastActive) {
         await clearBlockRules();
+        blockedDomainsSet.clear();
+        currentBlockMode = null;
         lastActive = false;
         lastMode = null;
         await saveState();
@@ -406,6 +536,9 @@ async function syncBlockRules() {
           allowed = sessionData.domains || [];
         }
         await applyWhitelistRules(allowed);
+        if (isRescue) {
+          currentBlockMode = "rescue";
+        }
         await clearBrowserCache();
         lastActive = true;
         lastMode = modeKey;
@@ -415,6 +548,8 @@ async function syncBlockRules() {
       // Idle — remove all rules
       if (lastActive) {
         await clearBlockRules();
+        blockedDomainsSet.clear();
+        currentBlockMode = null;
         lastActive = false;
         lastMode = null;
         await saveState();
@@ -448,6 +583,72 @@ async function syncBlockRules() {
     syncInProgress = false;
   }
 }
+
+// ── WebNavigation Redirect (R1) ───────────────────────────────────────────────
+// Two-layer redirect system that catches cases where /etc/hosts blocks the
+// domain before DNR rules can fire (causing ERR_CONNECTION_REFUSED).
+
+/**
+ * Layer 1: Intercept navigations BEFORE Chrome connects.
+ * This fires before DNS resolution, so it catches navigations even when
+ * /etc/hosts would block them. Provides instant redirects with zero delay.
+ */
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  // Only intercept top-level navigations (not iframes, etc.)
+  if (details.frameId !== 0) return;
+
+  if (shouldBlockUrl(details.url)) {
+    const hostname = extractHostname(details.url);
+    const blockedUrl =
+      chrome.runtime.getURL("blocked.html") +
+      "?domain=" +
+      encodeURIComponent(hostname || "this site");
+
+    // Record for analytics
+    if (hostname) recordBlockedRequest(hostname);
+
+    chrome.tabs.update(details.tabId, { url: blockedUrl });
+    log(`[R1] Pre-navigation redirect: ${hostname} → blocked.html`);
+  }
+});
+
+/**
+ * Layer 2: Catch connection errors from /etc/hosts blocking.
+ * When /etc/hosts resolves a domain to 127.0.0.1, Chrome shows
+ * ERR_CONNECTION_REFUSED. This listener catches that error and
+ * redirects to blocked.html as a fallback.
+ */
+chrome.webNavigation.onErrorOccurred.addListener((details) => {
+  // Only handle top-level navigation errors
+  if (details.frameId !== 0) return;
+
+  // Only handle connection-related errors (from /etc/hosts blocking)
+  const blockErrors = [
+    "net::ERR_CONNECTION_REFUSED",
+    "net::ERR_CONNECTION_RESET",
+    "net::ERR_CONNECTION_TIMED_OUT",
+    "net::ERR_NAME_NOT_RESOLVED",
+    "net::ERR_ADDRESS_UNREACHABLE",
+    "net::ERR_CONNECTION_CLOSED",
+    "net::ERR_EMPTY_RESPONSE",
+  ];
+
+  if (!blockErrors.includes(details.error)) return;
+
+  // Check if this URL belongs to a blocked domain
+  if (shouldBlockUrl(details.url)) {
+    const hostname = extractHostname(details.url);
+    const blockedUrl =
+      chrome.runtime.getURL("blocked.html") +
+      "?domain=" +
+      encodeURIComponent(hostname || "this site");
+
+    chrome.tabs.update(details.tabId, { url: blockedUrl });
+    log(
+      `[R1] Error-fallback redirect: ${hostname} (${details.error}) → blocked.html`,
+    );
+  }
+});
 
 // ── Extension Lifecycle ───────────────────────────────────────────────────────
 

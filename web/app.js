@@ -552,6 +552,22 @@ async function refreshLists() {
 
 function renderDomainList(container, domains, listName) {
   container.innerHTML = "";
+
+  if (!domains || domains.length === 0) {
+    const li = document.createElement("li");
+    li.style.justifyContent = "center";
+    li.style.padding = "16px";
+    li.style.color = "var(--text-muted)";
+    li.style.fontSize = "13px";
+    li.style.fontStyle = "italic";
+    li.style.background = "transparent";
+    li.style.border = "1px dashed var(--border)";
+    li.style.borderRadius = "8px";
+    li.textContent = "No domains added yet.";
+    container.appendChild(li);
+    return;
+  }
+
   domains.forEach((domain) => {
     const li = document.createElement("li");
     const span = document.createElement("span");
@@ -919,8 +935,9 @@ function initEvents() {
       }
 
       const originalBtnHTML = els.btnStart.innerHTML;
-      els.btnStart.textContent = "⏳ Starting...";
+      els.btnStart.innerHTML = '<span class="btn-spinner"></span> Starting...';
       els.btnStart.disabled = true;
+      els.btnStart.setAttribute("aria-busy", "true");
       isStarting = true;
 
       try {
@@ -939,6 +956,7 @@ function initEvents() {
       } finally {
         els.btnStart.innerHTML = originalBtnHTML;
         els.btnStart.disabled = false;
+        els.btnStart.removeAttribute("aria-busy");
         isStarting = false;
       }
       refreshStatus();
@@ -953,8 +971,10 @@ function initEvents() {
       mode: "whitelist",
       session_type: "rescue",
     };
-    els.btnRescue.textContent = "⏳ Activating...";
+    const originalRescueHTML = els.btnRescue.innerHTML;
+    els.btnRescue.innerHTML = '<span class="btn-spinner"></span> Activating...';
     els.btnRescue.disabled = true;
+    els.btnRescue.setAttribute("aria-busy", "true");
     try {
       const res = await api("POST", "/api/start", payload);
       if (res.status === "ok") {
@@ -965,9 +985,9 @@ function initEvents() {
         showToast(res.message || "Failed to activate Rescue Throne.");
       }
     } finally {
-      els.btnRescue.innerHTML =
-        '<span class="btn-icon">⚡</span> Activate Rescue';
+      els.btnRescue.innerHTML = originalRescueHTML;
       els.btnRescue.disabled = false;
+      els.btnRescue.removeAttribute("aria-busy");
     }
   });
 

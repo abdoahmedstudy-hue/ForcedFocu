@@ -575,8 +575,10 @@ function initEvents() {
       const intentInput = $("#intentDialogInput");
       if (intentDialog) intentDialog.classList.add("hidden");
 
-      btnStart.textContent = "⏳ Starting...";
+      const originalBtnHTML = btnStart.innerHTML;
+      btnStart.innerHTML = '<span class="btn-spinner"></span> Starting...';
       btnStart.disabled = true;
+      btnStart.setAttribute("aria-busy", "true");
 
       let payload = {};
       const intentVal = intentInput ? intentInput.value.trim() : "";
@@ -628,8 +630,9 @@ function initEvents() {
       } catch (error) {
         showError(`Failed to start session: ${error.message}`);
       } finally {
-        btnStart.textContent = "▶ Start Blocking";
+        btnStart.innerHTML = originalBtnHTML;
         btnStart.disabled = false;
+        btnStart.removeAttribute("aria-busy");
       }
     });
   }
@@ -638,8 +641,10 @@ function initEvents() {
   const btnRescue = $("#btnRescue");
   if (btnRescue) {
     btnRescue.addEventListener("click", async () => {
-      btnRescue.textContent = "⏳ Activating...";
+      const originalRescueHTML = btnRescue.innerHTML;
+      btnRescue.innerHTML = '<span class="btn-spinner"></span> Activating...';
       btnRescue.disabled = true;
+      btnRescue.setAttribute("aria-busy", "true");
 
       const rescueDuration = $("#rescueDuration");
       const dur = rescueDuration
@@ -662,8 +667,9 @@ function initEvents() {
       } catch (error) {
         showError(`Failed to activate rescue: ${error.message}`);
       } finally {
-        btnRescue.textContent = "⚡ Activate Rescue";
+        btnRescue.innerHTML = originalRescueHTML;
         btnRescue.disabled = false;
+        btnRescue.removeAttribute("aria-busy");
       }
     });
   }

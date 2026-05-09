@@ -148,7 +148,6 @@ class TestForcedFocusDaemon(unittest.TestCase):
         mock_enforce.assert_called_once()
         mock_write.assert_called_once()
 
-    @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     @patch(
         "forcefocus_daemon.subprocess.run",
         side_effect=Exception("Test cleanup exception"),
@@ -159,7 +158,6 @@ class TestForcedFocusDaemon(unittest.TestCase):
     @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     def test_cleanup_session_error_handling(
         self, mock_notif, mock_lock, mock_sound, mock_log_error, mock_run
-        self, mock_lock, mock_sound, mock_log_error, mock_run, mock_notify
     ):
         self.daemon.active = True
         self.daemon.mode = "blacklist"

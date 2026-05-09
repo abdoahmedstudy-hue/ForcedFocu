@@ -463,8 +463,10 @@ function initEvents() {
   });
 
   els.btnIntentConfirm.addEventListener("click", async () => {
-    els.btnIntentConfirm.textContent = "Starting...";
+    const originalIntentHTML = els.btnIntentConfirm.innerHTML;
+    els.btnIntentConfirm.innerHTML = '<span class="btn-spinner"></span> Starting...';
     els.btnIntentConfirm.disabled = true;
+    els.btnIntentConfirm.setAttribute("aria-busy", "true");
     isStarting = true;
 
     let payload = {
@@ -517,24 +519,34 @@ function initEvents() {
       console.error("Start failed:", e);
       alert("Communication failed.");
     } finally {
-      els.btnIntentConfirm.textContent = "Begin";
+      els.btnIntentConfirm.innerHTML = originalIntentHTML;
       els.btnIntentConfirm.disabled = false;
+      els.btnIntentConfirm.removeAttribute("aria-busy");
       isStarting = false;
     }
   });
 
   els.mbBtnRescue.addEventListener("click", async () => {
-    els.mbBtnRescue.textContent = "Activating...";
-    const dur = parseInt(els.rescueDur.value, 10);
-    const res = await api("POST", "/api/start", {
-      duration: dur,
-      mode: "whitelist",
-      session_type: "rescue",
-    });
-    els.mbBtnRescue.textContent = "Activate Rescue";
-    if (res.status === "ok") {
-      AudioManager.play("rescue");
-      refresh();
+    const originalRescueHTML = els.mbBtnRescue.innerHTML;
+    els.mbBtnRescue.innerHTML = '<span class="btn-spinner"></span> Activating...';
+    els.mbBtnRescue.disabled = true;
+    els.mbBtnRescue.setAttribute("aria-busy", "true");
+    
+    try {
+      const dur = parseInt(els.rescueDur.value, 10) || 10;
+      const res = await api("POST", "/api/start", {
+        duration: dur,
+        mode: "whitelist",
+        session_type: "rescue",
+      });
+      if (res.status === "ok") {
+        AudioManager.play("rescue");
+        refresh();
+      }
+    } finally {
+      els.mbBtnRescue.innerHTML = originalRescueHTML;
+      els.mbBtnRescue.disabled = false;
+      els.mbBtnRescue.removeAttribute("aria-busy");
     }
   });
 
@@ -570,8 +582,9 @@ function initEvents() {
       }
 
       btnUnlockConfirm.disabled = true;
-      const originalText = btnUnlockConfirm.textContent;
-      btnUnlockConfirm.textContent = "Unlocking...";
+      const originalUnlockHTML = btnUnlockConfirm.innerHTML;
+      btnUnlockConfirm.innerHTML = '<span class="btn-spinner"></span> Unlocking...';
+      btnUnlockConfirm.setAttribute("aria-busy", "true");
 
       try {
         const res = await api("POST", "/api/stop", { key });
@@ -584,7 +597,8 @@ function initEvents() {
         }
       } finally {
         btnUnlockConfirm.disabled = false;
-        btnUnlockConfirm.textContent = originalText;
+        btnUnlockConfirm.innerHTML = originalUnlockHTML;
+        btnUnlockConfirm.removeAttribute("aria-busy");
       }
     });
   }
