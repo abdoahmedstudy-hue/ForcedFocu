@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ForcedFocus LaunchDaemon
+  
+  This plist instructs launchd to:
+  - Run the daemon at boot (RunAtLoad)
+  - Restart it if it exits for any reason (KeepAlive)
+  - Execute as root (UserName)
+  - Use Interactive process priority (ProcessType)
+  
+  Install to: /Library/LaunchDaemons/com.forcefocus.daemon.plist
+  Load:       sudo launchctl load -w /Library/LaunchDaemons/com.forcefocus.daemon.plist
+  Unload:     sudo launchctl unload /Library/LaunchDaemons/com.forcefocus.daemon.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.forcefocus.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/python3</string>
+        <string>/usr/local/bin/forcefocus_daemon.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>UserName</key>
+    <string>root</string>
+
+    <key>GroupName</key>
+    <string>wheel</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/forcefocus.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/forcefocus_error.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/etc/forcefocus</string>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

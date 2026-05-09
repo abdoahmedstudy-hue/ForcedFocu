@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Blocked — ForcedFocus</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #06060b;
+        font-family:
+          "Inter",
+          -apple-system,
+          sans-serif;
+        color: #e2e8f0;
+        overflow: hidden;
+        position: relative;
+      }
+      body::before,
+      body::after {
+        content: "";
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(120px);
+        opacity: 0.15;
+        pointer-events: none;
+        z-index: 0;
+      }
+      body::before {
+        width: 600px;
+        height: 600px;
+        background: #6366f1;
+        top: -200px;
+        right: -200px;
+      }
+      body::after {
+        width: 500px;
+        height: 500px;
+        background: #8b5cf6;
+        bottom: -150px;
+        left: -150px;
+      }
+      .container {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        padding: 3rem;
+        max-width: 500px;
+        background: rgba(15, 15, 30, 0.7);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 28px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        transform: translateY(0);
+        transition: all 0.4s ease;
+      }
+      .container:hover {
+        transform: translateY(-5px);
+        box-shadow:
+          0 16px 40px rgba(0, 0, 0, 0.5),
+          0 0 30px rgba(244, 63, 94, 0.1);
+        background: rgba(20, 20, 45, 0.8);
+      }
+      .icon {
+        font-size: 5rem;
+        margin-bottom: 1.5rem;
+        animation: pulse 2s ease-in-out infinite;
+        filter: drop-shadow(0 0 15px rgba(244, 63, 94, 0.3));
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scale(1.1);
+          opacity: 0.8;
+        }
+      }
+      h1 {
+        font-size: 2rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        background: linear-gradient(135deg, #f43f5e, #ec4899);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .domain {
+        font-size: 1.1rem;
+        color: #94a3b8;
+        margin-bottom: 2rem;
+        font-family: monospace;
+        padding: 0.5rem 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        display: inline-block;
+      }
+      .message {
+        font-size: 1rem;
+        color: #64748b;
+        line-height: 1.6;
+      }
+      .badge {
+        display: inline-block;
+        padding: 0.5rem 1.2rem;
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border-radius: 100px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-top: 1.5rem;
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+        transition: all 0.3s ease;
+      }
+      .badge:hover {
+        background: rgba(239, 68, 68, 0.25);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+        transform: scale(1.05);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">🛡️</div>
+      <h1>Site Blocked</h1>
+      <div class="domain" id="blockedDomain">—</div>
+      <p class="message">
+        This site is blocked by ForcedFocus.<br />
+        Stay focused — you've got this! 💪
+      </p>
+      <div class="badge">⚡ ForcedFocus Active</div>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const domain = params.get("domain") || "this site";
+      document.getElementById("blockedDomain").textContent = domain;
+      document.title = `Blocked: ${domain} — ForcedFocus`;
+
+      // R5: Robust timer with SW suspension handling
+      function isExtensionValid() {
+        try {
+          return !!(chrome.runtime && chrome.runtime.id);
+        } catch {
+          return false;
+        }
+      }
+
+      let timerPoll = null;
+
+      function updateTimer() {
+        if (!isExtensionValid()) {
+          // Extension was reloaded/uninstalled — stop polling
+          if (timerPoll) clearInterval(timerPoll);
+          const badge = document.querySelector(".badge");
+          if (badge) badge.textContent = "⚡ Session active — stay focused!";
+          return;
+        }
+
+        try {
+          chrome.runtime.sendMessage(
+            { action: "getTimeRemaining" },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                // Service worker sleeping — show generic fallback instead of frozen time
+                const badge = document.querySelector(".badge");
+                if (badge)
+                  badge.textContent = "⚡ Session active — stay focused!";
+                return;
+              }
+              const badge = document.querySelector(".badge");
+              if (!badge) return;
+
+              if (response && response.remaining > 0) {
+                const h = Math.floor(response.remaining / 3600);
+                const m = Math.floor((response.remaining % 3600) / 60);
+                const s = response.remaining % 60;
+                badge.textContent = `⚡ ${h > 0 ? h + ":" : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} remaining`;
+              } else if (response && response.remaining === 0) {
+                badge.textContent = "✅ Session ended — you can close this tab";
+                badge.style.color = "#22c55e";
+                badge.style.background = "rgba(34, 197, 94, 0.15)";
+                badge.style.boxShadow = "0 0 10px rgba(34, 197, 94, 0.1)";
+                if (timerPoll) clearInterval(timerPoll);
+              }
+            },
+          );
+        } catch (e) {
+          // Extension context invalidated — stop polling entirely
+          if (timerPoll) clearInterval(timerPoll);
+        }
+      }
+
+      updateTimer();
+      // P3: Poll every 2s instead of 1s to reduce daemon load
+      timerPoll = setInterval(updateTimer, 2000);
+    </script>
+  </body>
+</html>

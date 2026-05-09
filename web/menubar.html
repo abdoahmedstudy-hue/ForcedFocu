@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>ForcedFocus Menu Bar</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* Transparent body for macOS vibrancy */
+      html,
+      body {
+        background: transparent !important;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      /* Remove the background orbs from styles.css */
+      body::before,
+      body::after {
+        display: none !important;
+      }
+
+      :root {
+        --text-primary: #ffffff;
+        --text-secondary: #e2e2f0;
+        --text-muted: #a0a0c0;
+        --accent-blue: #7c7fff;
+      }
+
+      .menubar-container {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        height: 100%;
+        box-sizing: border-box;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+      }
+
+      .chip-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+
+      .chip {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-secondary);
+        padding: 8px 4px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: var(--transition);
+        text-align: center;
+        flex: 1;
+      }
+
+      .chip.active {
+        background: rgba(99, 102, 241, 0.2);
+        border-color: var(--accent-blue);
+        color: var(--text-primary);
+      }
+
+      .duration-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+
+      .pomo-inputs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .input-group label {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #ffffff;
+        opacity: 0.8;
+        letter-spacing: 0.6px;
+        font-weight: 800;
+      }
+
+      .input-group input {
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        padding: 6px;
+        border-radius: 10px;
+        font-size: 11px;
+        width: 100%;
+        outline: none;
+      }
+
+      .rescue-section {
+        background: rgba(239, 68, 68, 0.05);
+        border: 1px solid rgba(239, 68, 68, 0.1);
+        border-radius: 18px;
+        padding: 12px;
+        margin-bottom: 4px;
+      }
+
+      .rescue-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      .rescue-header span {
+        font-size: 12px;
+        font-weight: 800;
+        color: #ff5f5f; /* More vivid red */
+      }
+
+      .btn-rescue {
+        width: 100%;
+        padding: 8px;
+        background: rgba(239, 68, 68, 0.1);
+        color: white;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn-start {
+        background: var(--accent-gradient);
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 16px;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+        margin-top: auto;
+      }
+
+      .info-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .info-item {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .info-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #ffffff;
+        opacity: 0.7;
+        letter-spacing: 0.6px;
+        font-weight: 800;
+      }
+
+      .info-value {
+        font-size: 12px;
+        font-weight: 800;
+        color: #ffffff;
+      }
+
+      .info-item.full {
+        grid-column: span 2;
+      }
+
+      .btn-full-ui {
+        width: 26px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 12px;
+        transition: var(--transition);
+      }
+
+      .btn-full-ui:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text-primary);
+        border-color: var(--border-active);
+      }
+
+      .btn-stop {
+        width: 100%;
+        padding: 18px;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 40px; /* Big Atom/Pill shape */
+        color: #ef4444;
+        font-size: 16px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        cursor: pointer;
+        transition: var(--transition);
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+      }
+
+      .btn-stop:hover {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: #ef4444;
+        transform: scale(1.02);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+      }
+
+      .timer-ring {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 10px 0;
+      }
+
+      .timer-ring svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+      }
+
+      .timer-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        z-index: 10;
+      }
+
+      .timer-time {
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .timer-label {
+        margin-top: 4px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: var(--text-muted);
+      }
+
+      .timer-progress {
+        fill: none;
+        stroke: var(--accent-blue);
+        stroke-dasharray: 0 565.48; /* 2 * PI * 90 */
+        stroke-dashoffset: 0;
+        stroke-width: 14;
+        stroke-linecap: round;
+        transition: stroke-dasharray 0.1s linear;
+      }
+
+      .timer-bg {
+        fill: none;
+        stroke: #ffffff;
+        stroke-width: 14;
+        opacity: 0.1;
+      }
+
+      .timer-ring.break .timer-progress {
+        stroke: #10b981; /* Green for breaks */
+      }
+
+      /* Group Selection */
+      .group-section {
+        margin-bottom: 8px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 14px;
+      }
+
+      .group-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      .group-header span:first-child {
+        font-size: 10px;
+        font-weight: 800;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .group-count {
+        font-size: 9px;
+        font-weight: 800;
+        color: var(--accent-blue);
+        background: rgba(124, 127, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 100px;
+      }
+
+      .group-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 80px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+
+      .group-grid::-webkit-scrollbar {
+        width: 2px;
+      }
+
+      .group-grid::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+      }
+
+      .group-chip {
+        padding: 3px 8px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 100px;
+        color: var(--text-muted);
+        font-size: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: var(--transition);
+        white-space: nowrap;
+      }
+
+      .group-chip:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-secondary);
+      }
+
+      .group-chip.active {
+        background: rgba(124, 127, 255, 0.15);
+        border-color: var(--accent-blue);
+        color: var(--text-primary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="menubar-container" id="appContainer">
+      <header class="header">
+        <div class="logo" style="display: flex; align-items: center; gap: 8px">
+          <div class="logo-icon" style="font-size: 18px">⚡</div>
+          <h2 style="font-size: 14px; margin: 0; font-weight: 700">
+            ForcedFocus
+          </h2>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px">
+          <div class="status-badge" id="mbBadge">
+            <span class="status-text" style="font-size: 10px">Idle</span>
+          </div>
+          <a
+            href="http://127.0.0.1:7070"
+            class="btn-full-ui"
+            title="Open Full Dashboard"
+            >↗</a
+          >
+        </div>
+      </header>
+
+      <!-- IDLE STATE -->
+      <div
+        id="idleState"
+        style="flex: 1; display: flex; flex-direction: column"
+      >
+        <!-- Mode Switcher -->
+        <div class="chip-row">
+          <button class="chip active mode-chip" data-mode="blacklist">
+            🚫 Blacklist
+          </button>
+          <button class="chip mode-chip" data-mode="whitelist">
+            ✅ Whitelist
+          </button>
+        </div>
+
+        <!-- Session Type Switcher -->
+        <div class="chip-row">
+          <button class="chip active type-chip" data-type="standard">
+            ⏱ Standard
+          </button>
+          <button class="chip type-chip" data-type="pomodoro">
+            🍅 Pomodoro
+          </button>
+        </div>
+
+        <!-- Standard Section -->
+        <div id="standardSection">
+          <div class="duration-grid">
+            <button class="chip dur-chip" data-min="30">30m</button>
+            <button class="chip dur-chip" data-min="60">1h</button>
+            <button class="chip dur-chip active" data-min="120">2h</button>
+            <button class="chip dur-chip" data-min="240">4h</button>
+          </div>
+          <div class="input-group" style="margin-bottom: 8px">
+            <input type="number" id="customMin" placeholder="Custom Minutes" />
+          </div>
+        </div>
+
+        <!-- Pomodoro Section -->
+        <div id="pomoSection" class="hidden">
+          <div class="duration-grid" style="margin-bottom: 8px">
+            <button
+              class="chip pomo-chip active"
+              data-focus="25"
+              data-break="5"
+            >
+              25/5
+            </button>
+            <button class="chip pomo-chip" data-focus="50" data-break="10">
+              50/10
+            </button>
+            <button class="chip pomo-chip" data-focus="90" data-break="20">
+              90/20
+            </button>
+          </div>
+          <div class="pomo-inputs">
+            <div class="input-group">
+              <label>Focus</label>
+              <input type="number" id="pomoFocus" value="25" />
+            </div>
+            <div class="input-group">
+              <label>Break</label>
+              <input type="number" id="pomoBreak" value="5" />
+            </div>
+            <div class="input-group">
+              <label>Cycles</label>
+              <input type="number" id="pomoCycles" value="4" />
+            </div>
+          </div>
+        </div>
+
+        <div id="groupSection" class="group-section hidden">
+          <div class="group-header">
+            <span>🛡️ Domain Groups</span>
+            <span class="group-count" id="groupCount">0 selected</span>
+          </div>
+          <div class="group-grid" id="groupGrid">
+            <!-- Groups populated by JS -->
+          </div>
+        </div>
+
+        <!-- Rescue Section -->
+        <div class="rescue-section">
+          <div class="rescue-header">
+            <span>🛡️ Rescue Throne</span>
+            <select
+              id="rescueDur"
+              style="
+                background: transparent;
+                border: none;
+                color: white;
+                font-size: 10px;
+                outline: none;
+              "
+            >
+              <option value="5">5m</option>
+              <option value="10" selected>10m</option>
+              <option value="30">30m</option>
+            </select>
+          </div>
+          <button class="btn-rescue" id="mbBtnRescue">Activate Rescue</button>
+        </div>
+
+        <button class="btn-start" id="mbBtnStart">Start Session</button>
+      </div>
+
+      <!-- INTENT DIALOG STATE -->
+      <div
+        id="intentState"
+        class="hidden"
+        style="
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          flex: 1;
+          gap: 16px;
+          padding: 20px;
+        "
+      >
+        <div style="font-size: 40px; text-shadow: 0 4px 10px rgba(0,0,0,0.3);">🎯</div>
+        <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: white;">What's your focus?</h3>
+        <p style="margin: -8px 0 0 0; font-size: 11px; color: var(--text-muted); text-align: center;">Set an intention for this session.</p>
+        <input
+          type="text"
+          id="intentPromptInput"
+          dir="auto"
+          placeholder="I will..."
+          autocomplete="off"
+          style="
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            color: white;
+            font-family: inherit;
+            font-size: 14px;
+            text-align: start;
+            outline: none;
+            transition: var(--transition);
+          "
+        />
+        <textarea
+          id="intentTasksInput"
+          dir="auto"
+          placeholder="Optional: subtasks (one per line)&#10;e.g.&#10;- Read PR&#10;- Leave review"
+          rows="3"
+          style="
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: white;
+            font-family: inherit;
+            font-size: 12px;
+            outline: none;
+            resize: vertical;
+            box-sizing: border-box;
+          "
+        ></textarea>
+        <div style="display: flex; gap: 8px; width: 100%; margin-top: 4px;">
+          <button
+            id="btnIntentCancel"
+            style="
+              flex: 1;
+              padding: 10px;
+              background: rgba(255, 255, 255, 0.05);
+              border: none;
+              border-radius: 12px;
+              color: rgba(255, 255, 255, 0.6);
+              font-family: inherit;
+              font-size: 12px;
+              font-weight: 600;
+              cursor: pointer;
+            "
+          >
+            Cancel
+          </button>
+          <button
+            id="btnIntentConfirm"
+            style="
+              flex: 2;
+              padding: 10px;
+              background: var(--accent-gradient);
+              border: none;
+              border-radius: 12px;
+              color: white;
+              font-family: inherit;
+              font-size: 12px;
+              font-weight: 700;
+              cursor: pointer;
+            "
+          >
+            Begin
+          </button>
+        </div>
+      </div>
+
+      <!-- ACTIVE STATE -->
+      <div
+        id="activeState"
+        class="hidden"
+        style="
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          flex: 1;
+          gap: 12px;
+        "
+      >
+        <div class="timer-ring" style="width: 140px; height: 140px">
+          <svg viewBox="0 0 200 200">
+            <circle class="timer-bg" cx="100" cy="100" r="90" />
+            <circle
+              class="timer-progress"
+              id="mbProgress"
+              cx="100"
+              cy="100"
+              r="90"
+            />
+          </svg>
+          <div class="timer-content">
+            <div class="timer-time" id="mbTime" style="font-size: 32px">
+              00:00
+            </div>
+            <div class="timer-label" id="mbLabel" style="font-size: 9px">
+              REMAINING
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="activeIntentContainer"
+          class="hidden"
+          style="
+            width: 100%;
+            margin-top: 4px;
+            padding: 10px;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 14px;
+            text-align: start;
+            box-sizing: border-box;
+          "
+        >
+          <div style="font-size: 11px; color: var(--text-secondary); font-weight: 500; line-height: 1.4;">
+            🎯 Session goal is: '<span id="activeIntentDisplay" dir="auto" style="font-weight: 700; color: white;"></span>'
+          </div>
+          <div id="activeIntentTasks" style="margin-top: 8px; text-align: start; font-size: 11px; color: var(--text-primary);"></div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Mode</span>
+            <span class="info-value" id="mbInfoMode">—</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Type</span>
+            <span class="info-value" id="mbInfoType">—</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Expires</span>
+            <span class="info-value" id="mbInfoExpires">—</span>
+          </div>
+          <div class="info-item" id="mbNextRow">
+            <span class="info-label">Next Phase</span>
+            <span class="info-value" id="mbInfoNext">—</span>
+            <span
+              id="mbInfoNextTime"
+              style="
+                font-size: 10px;
+                opacity: 0.7;
+                font-weight: 800;
+                margin-top: 2px;
+                font-variant-numeric: tabular-nums;
+              "
+              >--:--</span
+            >
+          </div>
+        </div>
+
+        <button class="btn-stop" id="mbBtnStop">
+          <span>🔐</span> REQUEST UNLOCK
+        </button>
+
+        <!-- S3: Inline unlock dialog -->
+        <div
+          id="unlockDialog"
+          class="hidden"
+          style="
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(15, 15, 30, 0.95);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 14px;
+          "
+        >
+          <p
+            style="
+              font-size: 11px;
+              color: rgba(255, 255, 255, 0.5);
+              margin-bottom: 8px;
+            "
+          >
+            Enter kill-switch passphrase:
+          </p>
+          <input
+            type="password"
+            id="unlockPassphrase"
+            placeholder="Passphrase"
+            autocomplete="off"
+            style="
+              width: 100%;
+              padding: 8px 10px;
+              background: rgba(255, 255, 255, 0.04);
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-radius: 10px;
+              color: white;
+              font-family: inherit;
+              font-size: 12px;
+              outline: none;
+              margin-bottom: 8px;
+            "
+          />
+          <div style="display: flex; gap: 6px">
+            <button
+              id="btnUnlockCancel"
+              style="
+                flex: 1;
+                padding: 7px;
+                background: rgba(255, 255, 255, 0.05);
+                border: none;
+                border-radius: 10px;
+                color: rgba(255, 255, 255, 0.5);
+                font-family: inherit;
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+              "
+            >
+              Cancel
+            </button>
+            <button
+              id="btnUnlockConfirm"
+              style="
+                flex: 1;
+                padding: 7px;
+                background: #ef4444;
+                border: none;
+                border-radius: 10px;
+                color: white;
+                font-family: inherit;
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+              "
+            >
+              Unlock
+            </button>
+          </div>
+          <p
+            id="unlockError"
+            class="hidden"
+            style="
+              color: #ef4444;
+              font-size: 10px;
+              margin-top: 6px;
+              text-align: center;
+            "
+          ></p>
+        </div>
+      </div>
+    </div>
+
+    <script src="menubar.js"></script>
+  </body>
+</html>

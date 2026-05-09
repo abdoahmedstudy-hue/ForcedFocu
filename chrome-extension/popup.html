@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ForcedFocus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+
+<body>
+  <!-- Offline State -->
+  <div class="offline hidden" id="offline">
+    <div class="offline-icon">⚡</div>
+    <p>Web server not running</p>
+    <span>Start it with: <code>forcefocus web</code></span>
+  </div>
+
+  <!-- Main Content -->
+  <div class="container" id="main">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        <span>ForcedFocus</span>
+      </div>
+      <div class="badge" id="badge">Idle</div>
+    </div>
+
+    <!-- Timer -->
+    <div class="timer-box" id="timerBox">
+      <div class="timer-ring">
+        <svg viewBox="0 0 120 120">
+          <circle class="ring-bg" cx="60" cy="60" r="52" />
+          <circle class="ring-progress" id="ringProgress" cx="60" cy="60" r="52" />
+        </svg>
+        <div class="timer-text">
+          <div class="timer-value" id="timerValue" role="timer" aria-live="polite">00:00</div>
+          <div class="timer-label" id="timerLabel">READY</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Controls (idle) -->
+    <div class="controls" id="idleControls">
+      <div class="mode-row">
+        <button class="mode-chip active" data-mode="blacklist" id="chipBlacklist">
+          🚫 Blacklist
+        </button>
+        <button class="mode-chip" data-mode="whitelist" id="chipWhitelist">
+          ✅ Whitelist
+        </button>
+      </div>
+      <div class="type-row">
+        <button class="type-chip active" data-type="standard">
+          ⏱ Standard
+        </button>
+        <button class="type-chip" data-type="pomodoro">🍅 Pomodoro</button>
+      </div>
+      <div id="standardControls">
+        <div class="dur-row">
+          <button class="dur-chip" data-min="30">30m</button>
+          <button class="dur-chip" data-min="60">1h</button>
+          <button class="dur-chip active" data-min="120">2h</button>
+          <button class="dur-chip" data-min="240">4h</button>
+        </div>
+        <div class="custom-row">
+          <input type="number" id="customMin" aria-label="Custom minutes" min="1" max="1440"
+            placeholder="Custom minutes" />
+        </div>
+      </div>
+      <div id="pomoControls" class="hidden">
+        <div class="dur-row">
+          <button class="pomo-chip active" data-focus="25" data-break="5">
+            25/5
+          </button>
+          <button class="pomo-chip" data-focus="50" data-break="10">
+            50/10
+          </button>
+          <button class="pomo-chip" data-focus="90" data-break="20">
+            90/20
+          </button>
+        </div>
+        <div class="pomo-fields">
+          <div class="pomo-field">
+            <label for="pomoFocus">Focus</label>
+            <input type="number" id="pomoFocus" min="1" max="240" value="25" />
+          </div>
+          <div class="pomo-field">
+            <label for="pomoBreak">Break</label>
+            <input type="number" id="pomoBreak" min="1" max="60" value="5" />
+          </div>
+          <div class="pomo-field">
+            <label for="pomoCycles">Cycles</label>
+            <input type="number" id="pomoCycles" min="1" max="50" value="4" />
+          </div>
+        </div>
+        <div class="pomo-total" id="pomoTotal">Total: 2h 00m</div>
+      </div>
+
+      <!-- Group Selection -->
+      <div id="groupSection" class="group-section hidden">
+        <div class="group-header">
+          <span>🛡️ Domain Groups</span>
+          <span class="group-count" id="groupCount">0 selected</span>
+        </div>
+        <div class="group-grid" id="groupGrid">
+          <!-- Groups populated by JS -->
+        </div>
+      </div>
+
+      <div class="rescue-box" style="
+            margin-bottom: 12px;
+            padding: 15px;
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 21px;
+          ">
+        <div style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 8px;
+            ">
+          <span style="font-size: 12px; font-weight: 600; color: var(--red)">🛡️ Rescue Throne</span>
+          <select id="rescueDuration" aria-label="Rescue duration in minutes" style="
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: var(--text);
+                border-radius: var(--rxs);
+                padding: 2px 6px;
+                font-size: 11px;
+                outline: none;
+                cursor: pointer;
+              ">
+            <option value="5" style="background: var(--bg2)">5 min</option>
+            <option value="10" selected style="background: var(--bg2)">
+              10 min
+            </option>
+            <option value="30" style="background: var(--bg2)">30 min</option>
+          </select>
+        </div>
+        <button class="btn-rescue" id="btnRescue">⚡ Activate Rescue</button>
+      </div>
+
+      <button class="btn-start" id="btnStart">▶ Start Blocking</button>
+    </div>
+
+    <!-- Active Controls -->
+    <div class="controls hidden" id="activeControls">
+      <div id="activeIntentContainer" style="
+            display: none;
+            margin-bottom: 12px;
+            padding: 12px;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: 21px;
+            text-align: start;
+          ">
+        <div style="
+              font-size: 13px;
+              color: var(--text2);
+              font-weight: 500;
+            ">
+          🎯 Session goal is: '<span id="activeIntentDisplay" dir="auto" style="font-weight: 700; color: var(--text);"></span>'
+        </div>
+        <div id="activeIntentTasks" style="margin-top: 8px; text-align: start; font-size: 12px; color: var(--text);"></div>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Mode</span>
+        <span class="info-value" id="infoMode">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Type</span>
+        <span class="info-value" id="infoType">—</span>
+      </div>
+      <div class="info-row" id="pomoPhaseRow" style="display: none">
+        <span class="info-label">Phase</span>
+        <span class="info-value" id="infoPhase"><span class="phase-dot"></span> —</span>
+      </div>
+      <div class="info-row" id="pomoCycleRow" style="display: none">
+        <span class="info-label">Cycle</span>
+        <span class="info-value" id="infoCycle">—</span>
+      </div>
+      <div class="info-row" id="pomoNextRow" style="display: none">
+        <span class="info-label">Next Phase</span>
+        <span class="info-value" id="infoPomoNext">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Expires</span>
+        <span class="info-value" id="infoExpires">—</span>
+      </div>
+      <div class="info-row" id="unlockRow" style="display: none">
+        <span class="info-label">Unlock at</span>
+        <span class="info-value unlock-val" id="infoUnlock">—</span>
+      </div>
+      <button class="btn-stop" id="btnStop">🔐 Request Unlock</button>
+    </div>
+
+    <!-- Intent Dialog -->
+    <div class="stop-dialog hidden" id="intentDialog">
+      <p>🎯 Focus Intent:</p>
+      <input type="text" id="intentDialogInput" dir="auto" aria-label="Focus Intent" placeholder="e.g. Write project spec"
+        autocomplete="off" />
+      <textarea id="intentTasksInput" dir="auto" aria-label="Tasks" placeholder="Optional: subtasks (one per line)" rows="3" style="width: 100%; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); padding: 8px; color: var(--text); outline: none; font-size: 12px; resize: vertical; margin-top: 8px; box-sizing: border-box; font-family: inherit;"></textarea>
+      <div class="dialog-btns">
+        <button class="dbtn dbtn-cancel" id="btnCancelIntent">Cancel</button>
+        <button class="dbtn dbtn-confirm" id="btnConfirmIntent">Start</button>
+      </div>
+    </div>
+
+    <!-- Stop Dialog -->
+    <div class="stop-dialog hidden" id="stopDialog">
+      <p>Enter kill-switch passphrase:</p>
+      <input type="password" id="passInput" aria-label="Kill-switch passphrase" placeholder="Passphrase"
+        autocomplete="off" />
+      <div class="dialog-btns">
+        <button class="dbtn dbtn-cancel" id="btnCancel">Cancel</button>
+        <button class="dbtn dbtn-confirm" id="btnConfirm">Unlock</button>
+      </div>
+      <p class="err hidden" id="errMsg"></p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <a href="http://127.0.0.1:7070" target="_blank" id="openUI">Open Full UI ↗</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

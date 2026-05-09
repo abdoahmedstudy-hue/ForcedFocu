@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ForcedFocus — Stay Focused</title>
+  <meta name="description" content="ForcedFocus: Unbreakable website blocker for macOS productivity." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <div class="app">
+    <div class="dashboard-layout">
+      <div class="dashboard-sidebar">
+        <!-- Header -->
+        <header class="header">
+          <div class="logo">
+            <div class="logo-icon">⚡</div>
+            <div>
+              <h1>ForcedFocus</h1>
+              <p class="tagline">Unbreakable Productivity</p>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px">
+            <a href="settings.html" class="settings-btn" title="Sound Settings" aria-label="Sound Settings">⚙️</a>
+            <div class="status-badge" id="statusBadge">
+              <span class="status-dot"></span>
+              <span class="status-text">Idle</span>
+            </div>
+          </div>
+        </header>
+        <!-- Timer Section -->
+        <section class="timer-section" id="timerSection">
+          <div class="timer-ring" id="timerRing">
+            <svg viewBox="0 0 200 200">
+              <defs>
+                <linearGradient id="timerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="var(--accent-blue)" />
+                  <stop offset="100%" stop-color="var(--accent-violet)" />
+                </linearGradient>
+              </defs>
+              <circle class="timer-bg" cx="100" cy="100" r="90" />
+              <circle class="timer-progress" id="timerProgress" cx="100" cy="100" r="90"
+                style="stroke: url(#timerGradient)" />
+            </svg>
+            <div class="timer-blob"></div>
+            <div class="timer-inner">
+              <div class="timer-value" id="timerValue" role="timer" aria-live="polite">00:00:00</div>
+              <div class="timer-label" id="timerLabel">REMAINING</div>
+            </div>
+          </div>
+          <div id="activeIntentContainer" style="
+                display: none;
+                margin-top: 4rem;
+                margin-bottom: -1rem;
+                padding: 14px 24px;
+                background: rgba(99, 102, 241, 0.1);
+                border: 1px solid rgba(99, 102, 241, 0.25);
+                border-radius: 16px;
+                text-align: start;
+                max-width: 90%;
+                animation: slideDown 0.3s ease;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+              ">
+            <div style="font-size: 16px; color: var(--text-secondary); font-weight: 500;">
+              🎯 Session goal is: '<span id="activeIntentDisplay" dir="auto" style="font-weight: 700; color: var(--text);"></span>'
+            </div>
+            <div id="activeIntentTasks" style="margin-top: 12px; text-align: start; font-size: 14px;"></div>
+          </div>
+          <div class="timer-info" id="timerInfo">
+            <span id="modeDisplay">—</span>
+            <span id="expiresDisplay">—</span>
+            <div class="pomo-status hidden" id="pomoStatus">
+              <div style="display: flex; gap: 8px; align-items: center">
+                <span class="pomo-phase-badge focus" id="pomoPhase">FOCUS</span>
+                <span id="pomoCycleDisplay">Cycle 1/4</span>
+              </div>
+              <span id="pomoNextTimeDisplay" style="
+                    font-size: 13px;
+                    color: var(--text-muted);
+                    margin-top: 4px;
+                    display: none;
+                  ">Next break at 1:25 PM</span>
+            </div>
+          </div>
+        </section>
+        <!-- Main Navigation -->
+        <nav class="main-nav" role="tablist">
+          <button class="nav-btn active" data-tab="tab-dashboard" role="tab">
+            <span class="nav-icon" aria-hidden="true">⏱</span> Dashboard
+          </button>
+          <button class="nav-btn" data-tab="tab-rules" role="tab">
+            <span class="nav-icon" aria-hidden="true">🛡️</span> Rules
+          </button>
+          <button class="nav-btn" data-tab="tab-schedules" role="tab">
+            <span class="nav-icon" aria-hidden="true">📅</span> Schedules
+          </button>
+        </nav>
+
+        <!-- Start/Stop (Global) -->
+        <div class="action-buttons" style="margin-top: auto; padding-top: 1px">
+          <button class="btn btn-start" id="btnStart">Start Blocking</button>
+          <button class="btn btn-stop hidden" id="btnStop">
+            <span class="btn-icon">🔐</span> Request Unlock
+          </button>
+        </div>
+
+        <div class="unlock-info hidden" id="unlockInfo">
+          <p>⏱ Unlock pending — releases at 12:00 (10m left)</p>
+        </div>
+      </div>
+
+      <div class="dashboard-main">
+        <!-- TAB: Dashboard -->
+        <div class="tab-pane active" id="tab-dashboard">
+          <section class="controls-section">
+            <!-- Mode Selector -->
+            <div class="card" id="modeCard">
+              <h2 class="card-title">Blocking Mode</h2>
+              <div class="mode-toggle">
+                <button class="mode-btn active" id="btnBlacklist" data-mode="blacklist">
+                  <span class="mode-icon">🚫</span>
+                  <span class="mode-name">Blacklist</span>
+                  <span class="mode-desc">Block listed sites</span>
+                </button>
+                <button class="mode-btn" id="btnWhitelist" data-mode="whitelist">
+                  <span class="mode-icon">✅</span>
+                  <span class="mode-name">Whitelist</span>
+                  <span class="mode-desc">Allow only listed sites</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Unified Session Settings -->
+            <div class="card" id="sessionSettingsCard">
+              <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 16px;
+                  ">
+                <h2 class="card-title" id="sessionSettingsTitle" style="margin-bottom: 0">
+                  Session Duration
+                </h2>
+
+                <div style="
+                      display: flex;
+                      gap: 4px;
+                      padding: 4px;
+                      background: rgba(255, 255, 255, 0.02);
+                      border-radius: 20px;
+                      border: 1px solid var(--border);
+                    ">
+                  <button class="session-type-btn active" data-type="standard" style="
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 6px 12px;
+                        border-radius: 16px;
+                        border: none;
+                        background: transparent;
+                        cursor: pointer;
+                        color: var(--text-secondary);
+                        font-family: inherit;
+                        font-size: 12px;
+                        font-weight: 600;
+                        transition: var(--transition);
+                      ">
+                    <span>⏱</span> Standard
+                  </button>
+                  <button class="session-type-btn" data-type="pomodoro" style="
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 6px 12px;
+                        border-radius: 16px;
+                        border: none;
+                        background: transparent;
+                        cursor: pointer;
+                        color: var(--text-secondary);
+                        font-family: inherit;
+                        font-size: 12px;
+                        font-weight: 600;
+                        transition: var(--transition);
+                      ">
+                    <span>🍅</span> Pomodoro
+                  </button>
+                </div>
+              </div>
+
+              <!-- Standard Duration Controls -->
+              <div id="standardSettingsArea">
+                <div class="duration-grid">
+                  <button class="dur-btn" data-minutes="30">30m</button>
+                  <button class="dur-btn" data-minutes="60">1h</button>
+                  <button class="dur-btn active" data-minutes="120">
+                    2h
+                  </button>
+                  <button class="dur-btn" data-minutes="180">3h</button>
+                  <button class="dur-btn" data-minutes="240">4h</button>
+                  <button class="dur-btn" data-minutes="480">8h</button>
+                </div>
+                <div class="custom-duration">
+                  <label for="customMinutes" class="sr-only">Custom duration in minutes</label>
+                  <input type="number" id="customMinutes" min="1" max="1440" placeholder="Custom (min)" />
+                </div>
+              </div>
+
+              <!-- Pomodoro Controls -->
+              <div id="pomodoroSettingsArea" class="hidden">
+                <div class="pomo-presets">
+                  <button class="dur-btn active pomo-preset" data-focus="25" data-break="5">
+                    25/5
+                  </button>
+                  <button class="dur-btn pomo-preset" data-focus="50" data-break="10">
+                    50/10
+                  </button>
+                  <button class="dur-btn pomo-preset" data-focus="90" data-break="20">
+                    90/20
+                  </button>
+                </div>
+                <div class="pomo-custom">
+                  <div class="pomo-field">
+                    <label for="pomoFocus">Focus (min)</label>
+                    <input type="number" id="pomoFocus" min="1" max="240" value="25" />
+                  </div>
+                  <div class="pomo-field">
+                    <label for="pomoBreak">Break (min)</label>
+                    <input type="number" id="pomoBreak" min="1" max="60" value="5" />
+                  </div>
+                  <div class="pomo-field">
+                    <label for="pomoCycles">Cycles</label>
+                    <input type="number" id="pomoCycles" min="1" max="50" value="4" />
+                  </div>
+                </div>
+                <p class="pomo-summary" id="pomoSummary">
+                  Total: 2h 00m (4 × 25m focus + 5m break)
+                </p>
+              </div>
+            </div>
+
+            <!-- Rescue Throne -->
+            <div class="card rescue-card" id="rescueCard">
+              <div class="rescue-header" style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 8px;
+                  ">
+                <h2 class="card-title" style="margin-bottom: 0">
+                  🛡️ Rescue Throne
+                </h2>
+                <label for="rescueDuration" class="sr-only">Rescue duration in minutes</label>
+                <select id="rescueDuration" class="rescue-select" style="
+                      background: rgba(255, 255, 255, 0.05);
+                      border: 1px solid rgba(255, 255, 255, 0.1);
+                      color: var(--text-primary);
+                      padding: 4px 8px;
+                      border-radius: var(--radius-xs);
+                      font-family: inherit;
+                      font-size: 13px;
+                      outline: none;
+                      cursor: pointer;
+                    ">
+                  <option value="5" style="background: var(--bg-secondary)">
+                    5 min
+                  </option>
+                  <option value="10" selected style="background: var(--bg-secondary)">
+                    10 min
+                  </option>
+                  <option value="30" style="background: var(--bg-secondary)">
+                    30 min
+                  </option>
+                </select>
+              </div>
+              <p class="rescue-desc" style="
+                    font-size: 13px;
+                    color: var(--text-secondary);
+                    margin-bottom: 16px;
+                  ">
+                Emergency lockdown. Blocks <strong>all</strong> websites
+                without exception.
+              </p>
+              <button class="btn btn-rescue" id="btnRescue" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: rgba(239, 68, 68, 0.1);
+                    border: 1px solid rgba(239, 68, 68, 0.3);
+                    border-radius: var(--radius);
+                    color: var(--danger);
+                    font-family: inherit;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: var(--transition);
+                    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.1);
+                  ">
+                Activate Rescue
+              </button>
+            </div>
+          </section>
+        </div>
+        <!-- TAB: Rules -->
+        <div class="tab-pane" id="tab-rules">
+          <section class="lists-section">
+            <!-- Active Groups Selection -->
+            <div class="card list-card" style="grid-column: 1 / -1; margin-bottom: 0">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🛡️</span> Domain Groups
+                </h2>
+              </div>
+              <p class="list-desc">
+                Select groups to include in your next session. Configure
+                groups in Settings.
+              </p>
+              <div id="sessionGroups" style="
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    margin-top: 12px;
+                  ">
+                <!-- Dynamically populated -->
+                <div class="loading" style="font-size: 13px; color: var(--text-muted)">
+                  Loading groups...
+                </div>
+              </div>
+            </div>
+
+            <!-- Blacklist -->
+            <div class="card list-card">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🚫</span> Blacklist
+                </h2>
+                <span class="list-count" id="blacklistCount">0</span>
+              </div>
+              <p class="list-desc">
+                These sites will be blocked in Blacklist mode.
+              </p>
+              <div class="add-domain">
+                <label for="blacklistInput" class="sr-only">Domains to blacklist</label>
+                <textarea id="blacklistInput" placeholder="e.g. reddit.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add" id="btnAddBlacklist" aria-label="Add to blacklist">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="blacklistDomains"></ul>
+            </div>
+
+            <!-- Whitelist -->
+            <div class="card list-card">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">✅</span> Whitelist
+                </h2>
+                <span class="list-count" id="whitelistCount">0</span>
+              </div>
+              <p class="list-desc">
+                Only these sites will be allowed in Whitelist mode.
+              </p>
+              <div class="add-domain">
+                <label for="whitelistInput" class="sr-only">Domains to whitelist</label>
+                <textarea id="whitelistInput" placeholder="e.g. github.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add" id="btnAddWhitelist" aria-label="Add to whitelist">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="whitelistDomains"></ul>
+            </div>
+          </section>
+        </div>
+
+        <!-- TAB: Schedules -->
+        <div class="tab-pane" id="tab-schedules">
+          <section class="controls-section">
+            <!-- Scheduling Card -->
+            <div class="card" id="scheduleCard">
+              <h2 class="card-title">Create Schedule</h2>
+              <div class="mode-toggle schedule-toggle" style="margin-bottom: 12px">
+                <button class="mode-btn schedule-type-btn active" data-type="now">
+                  <span class="mode-icon">⚡</span>
+                  <span class="mode-name">Now</span>
+                </button>
+                <button class="mode-btn schedule-type-btn" data-type="in">
+                  <span class="mode-icon">⏳</span>
+                  <span class="mode-name">Later</span>
+                </button>
+                <button class="mode-btn schedule-type-btn" data-type="at">
+                  <span class="mode-icon">📅</span>
+                  <span class="mode-name">Time</span>
+                </button>
+              </div>
+              <div class="schedule-inputs">
+                <div id="scheduleInWrapper" class="hidden">
+                  <label for="scheduleIn">Start after (minutes):</label>
+                  <input type="number" id="scheduleIn" min="1" max="1440" placeholder="e.g. 15" />
+                </div>
+                <div id="scheduleAtWrapper" class="hidden">
+                  <label for="scheduleAt">Start on date & time:</label>
+                  <input type="datetime-local" id="scheduleAt" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Upcoming Schedules -->
+            <div class="card hidden" id="upcomingSchedulesCard">
+              <div class="list-header" style="margin-bottom: 12px">
+                <h2 class="card-title" style="margin-bottom: 0">
+                  ⏳ Upcoming Schedules
+                </h2>
+                <span class="list-count" id="upcomingSchedulesCount">0</span>
+              </div>
+              <ul class="domain-list" id="upcomingSchedulesList">
+                <!-- Populated by JS -->
+              </ul>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stop Modal -->
+    <div class="modal-overlay hidden" id="stopModal">
+      <div class="modal">
+        <h2>🔐 Unlock Session</h2>
+        <p>
+          Enter your kill-switch passphrase.<br />
+          <strong>Blocking will continue for 20 more minutes</strong> after
+          verification.
+        </p>
+        <form id="passphraseForm" onsubmit="return false;">
+          <label for="passphraseInput" class="sr-only">Kill-switch passphrase</label>
+          <input type="password" id="passphraseInput" placeholder="Kill-switch passphrase" autocomplete="off" />
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelStop">Cancel</button>
+          <button class="btn btn-confirm" id="btnConfirmStop">
+            Confirm Unlock
+          </button>
+        </div>
+        <p class="modal-error hidden" id="modalError"></p>
+      </div>
+    </div>
+
+    <!-- Intent Modal -->
+    <div class="modal-overlay hidden" id="intentModal">
+      <div class="modal">
+        <h2>🎯 Focus Intent</h2>
+        <p>What is your primary goal for this session?</p>
+        <form id="intentForm" onsubmit="return false;">
+          <label for="intentModalInput" class="sr-only">Focus Intent</label>
+          <input type="text" id="intentModalInput" dir="auto" placeholder="e.g. Finish the Q3 presentation" autocomplete="off" />
+          <label for="intentTasksInput" class="sr-only">Tasks (optional, one per line)</label>
+          <textarea id="intentTasksInput" dir="auto" placeholder="Optional: list subtasks here (one per line)&#10;e.g.&#10;- Outline slides&#10;- Find images" rows="3" style="margin-top: 12px; width: 100%; border-radius: var(--radius-sm); border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0,0,0,0.2); padding: 12px; color: var(--text-primary); outline: none; font-family: inherit; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelIntent">Cancel</button>
+          <button class="btn btn-start" id="btnConfirmIntent">
+            Start Focus
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recap Modal -->
+    <div class="modal-overlay hidden" id="recapModal">
+      <div class="modal" style="max-width: 500px; text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 16px;">🎊</div>
+        <h2 id="recapTitle">Session Recap</h2>
+        <p id="recapSubTitle">Here is what you achieved during this session.</p>
+        
+        <div class="recap-content" style="text-align: start; margin-top: 24px;">
+          <div style="margin-bottom: 20px;">
+            <span style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">Original Goal</span>
+            <div id="recapIntentDisplay" dir="auto" style="font-size: 18px; font-weight: 700; color: white; margin-top: 4px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--border);"></div>
+          </div>
+          
+          <div id="recapTasksSection">
+            <span style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">Tasks Breakdown</span>
+            <div id="recapTasksList" style="margin-top: 12px; max-height: 200px; overflow-y: auto; padding-right: 8px;"></div>
+          </div>
+        </div>
+
+        <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border);">
+          <button class="btn btn-start" id="btnContinueRecap" style="width: 100%;">Great Job!</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sound Settings — ForcedFocus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="logo">
+        <a href="index.html" class="back-btn" title="Back to Dashboard">←</a>
+        <div>
+          <h1>Settings</h1>
+          <p class="tagline">Audio Customization</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard-main">
+      <div class="grid-container">
+        <!-- Left: Sound Mapping -->
+        <section class="card">
+          <div class="card-header">
+            <h3 class="card-title">🎵 Sound Mapping</h3>
+            <p class="list-desc">
+              Select which audio files play for specific events.
+            </p>
+          </div>
+
+          <div class="settings-grid" id="settingsGrid" style="flex: 1">
+            <div class="loading">Fetching audio files...</div>
+          </div>
+
+          <div class="upload-section">
+            <label class="upload-label">
+              <span>Upload New Sound (.mp3)</span>
+              <input type="file" id="fileInput" accept="audio/mpeg" hidden />
+              <button class="btn-upload" id="btnTriggerUpload">
+                Choose File
+              </button>
+            </label>
+            <div id="uploadStatus" class="upload-status"></div>
+          </div>
+
+          <div class="library-section">
+            <button class="library-toggle" id="btnToggleLibrary">
+              <span>Your Sounds</span>
+              <span class="toggle-icon">▼</span>
+            </button>
+            <div class="library-content hidden" id="libraryContent">
+              <div class="sound-list scroll-area" id="soundLibrary">
+                <div class="loading">Loading library...</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px">
+            <button class="btn secondary" id="btnSaveSettings" style="width: 100%">
+              Save Preferences
+            </button>
+          </div>
+        </section>
+
+
+
+        <!-- Right: Domain Groups -->
+        <section class="card">
+          <div class="card-header">
+            <div style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                ">
+              <h3 class="card-title">🛡️ Domain Groups</h3>
+              <button class="btn-add" id="btnNewGroup" aria-label="Add new domain group">
+                +
+              </button>
+            </div>
+            <p class="list-desc">
+              Create sets of websites to block together.
+            </p>
+          </div>
+
+          <div class="group-list scroll-area" id="groupList" style="flex: 1; margin-top: 16px; max-height: 500px">
+            <div class="loading">Loading groups...</div>
+          </div>
+
+          <!-- Notifications Settings -->
+          <div style="margin-top: 32px; border-top: 1px solid var(--border); padding-top: 24px;">
+            <div class="card-header">
+              <h3 class="card-title">🔔 Notifications</h3>
+              <p class="list-desc">
+                Configure system alerts for your focus sessions.
+              </p>
+            </div>
+
+            <div class="settings-item" style="margin-top: 16px">
+              <div class="settings-item-col">
+                <label for="intentNotifEnabled">Continuous Target Reminders</label>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                  Send a system notification to remind you of your target.
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="intentNotifEnabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-item">
+              <label for="intentNotifInterval">Reminder Interval</label>
+              <select id="intentNotifInterval" class="custom-select">
+                <option value="5">Every 5 min</option>
+                <option value="10">Every 10 min</option>
+                <option value="15">Every 15 min</option>
+                <option value="30">Every 30 min</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <div style="margin-top: 40px; display: flex; justify-content: center">
+        <a href="index.html" class="btn btn-ghost" style="max-width: 250px; text-decoration: none">Back to Dashboard</a>
+      </div>
+    </main>
+
+    <!-- Group Edit Modal -->
+    <div class="modal-overlay hidden" id="groupModal">
+      <div class="modal card glass" style="max-width: 500px; width: 90%">
+        <h2 id="groupModalTitle">🛡️ New Group</h2>
+        <div style="
+              display: flex;
+              flex-direction: column;
+              gap: 16px;
+              margin-top: 20px;
+            ">
+          <div class="pomo-field">
+            <label>Group Name</label>
+            <input type="text" id="groupNameInput" placeholder="e.g. Social Media" />
+          </div>
+          <div class="pomo-field">
+            <label>Domains (one per line)</label>
+            <textarea id="groupDomainsInput" class="custom-textarea"
+              placeholder="reddit.com&#10;twitter.com"></textarea>
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 24px">
+          <button class="btn secondary" id="btnSaveGroup">Save Group</button>
+          <button class="btn" id="btnCancelGroup" style="
+                background: rgba(255, 255, 255, 0.05);
+                color: var(--text-primary);
+              ">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+
+</html>
