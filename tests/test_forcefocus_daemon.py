@@ -56,6 +56,43 @@ class TestForcedFocusDaemon(unittest.TestCase):
 
     @patch("forcefocus_daemon.ForcedFocusDaemon._save_lists")
     @patch("forcefocus_daemon.ForcedFocusDaemon._load_lists")
+    def test_cmd_add_domains(self, mock_load, mock_save):
+        # 1. Success case: mix of new, existing, and invalid domains
+        mock_load.return_value = {"blacklist": ["initial.com"], "whitelist": []}
+        cmd = {
+            "list": "blacklist",
+            "domains": ["example.com", "test.org", "initial.com", "invalid"],
+        }
+
+        result = self.daemon._cmd_add_domains(cmd)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("example.com", result["lists"]["blacklist"])
+        self.assertIn("test.org", result["lists"]["blacklist"])
+        self.assertIn("initial.com", result["lists"]["blacklist"])
+        self.assertNotIn("invalid", result["lists"]["blacklist"])
+        # initial.com was already there, example.com and test.org are new. invalid is invalid.
+        self.assertEqual(result["message"], "Added 2 domains to blacklist.")
+        mock_save.assert_called_once()
+
+        # 2. Invalid list name
+        mock_save.reset_mock()
+        cmd = {"list": "invalid_list", "domains": ["a.com"]}
+        result = self.daemon._cmd_add_domains(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Invalid list name.")
+        mock_save.assert_not_called()
+
+        # 3. Active session
+        self.daemon.active = True
+        cmd = {"list": "blacklist", "domains": ["a.com"]}
+        result = self.daemon._cmd_add_domains(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Cannot modify lists during active session.")
+        self.daemon.active = False
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._save_lists")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._load_lists")
     def test_cmd_remove_domain(self, mock_load, mock_save):
         mock_load.return_value = {"blacklist": ["example.com"], "whitelist": []}
         cmd = {"list": "blacklist", "domain": "example.com"}
@@ -111,6 +148,7 @@ class TestForcedFocusDaemon(unittest.TestCase):
         mock_enforce.assert_called_once()
         mock_write.assert_called_once()
 
+    @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     @patch(
         "forcefocus_daemon.subprocess.run",
         side_effect=Exception("Test cleanup exception"),
@@ -119,7 +157,7 @@ class TestForcedFocusDaemon(unittest.TestCase):
     @patch("forcefocus_daemon.ForcedFocusDaemon._play_sound")
     @patch("forcefocus_daemon.SESSION_LOCK")
     def test_cleanup_session_error_handling(
-        self, mock_lock, mock_sound, mock_log_error, mock_run
+        self, mock_lock, mock_sound, mock_log_error, mock_run, mock_notify
     ):
         self.daemon.active = True
         self.daemon.mode = "blacklist"
