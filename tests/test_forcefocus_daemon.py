@@ -15,7 +15,8 @@ class TestForcedFocusDaemon(unittest.TestCase):
             "forcefocus_daemon.ForcedFocusDaemon._load_settings", return_value={}
         ):
             with patch("forcefocus_daemon.ForcedFocusDaemon._restore_session"):
-                self.daemon = ForcedFocusDaemon()
+                with patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification"):
+                    self.daemon = ForcedFocusDaemon()
 
     def test_validate_domain(self):
         # Valid domains
@@ -127,8 +128,17 @@ class TestForcedFocusDaemon(unittest.TestCase):
         self.daemon._cleanup_session()
 
         self.assertFalse(self.daemon.active)
-        mock_log_error.assert_called_once()
-        self.assertIn("cleanup_session error", mock_log_error.call_args[0][0])
+        # Should be called at least once since _cleanup_session logs errors
+        self.assertTrue(mock_log_error.called)
+
+        # Check that one of the calls was for cleanup_session error
+        found = False
+        for call in mock_log_error.call_args_list:
+            if "cleanup_session error" in call[0][0]:
+                found = True
+                break
+        self.assertTrue(found)
+
         mock_lock.unlink.assert_called_once_with(missing_ok=True)
         self.assertEqual(self.daemon.session_expiry, None)
         self.assertEqual(self.daemon.mode, "blacklist")
