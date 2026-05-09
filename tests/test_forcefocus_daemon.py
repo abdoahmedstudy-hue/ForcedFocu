@@ -15,7 +15,8 @@ class TestForcedFocusDaemon(unittest.TestCase):
             "forcefocus_daemon.ForcedFocusDaemon._load_settings", return_value={}
         ):
             with patch("forcefocus_daemon.ForcedFocusDaemon._restore_session"):
-                self.daemon = ForcedFocusDaemon()
+                with patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification"):
+                    self.daemon = ForcedFocusDaemon()
 
     def test_validate_domain(self):
         # Valid domains
@@ -52,6 +53,43 @@ class TestForcedFocusDaemon(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("example.com", result["lists"]["blacklist"])
         mock_save.assert_called_once()
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._save_lists")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._load_lists")
+    def test_cmd_add_domains(self, mock_load, mock_save):
+        # 1. Success case: mix of new, existing, and invalid domains
+        mock_load.return_value = {"blacklist": ["initial.com"], "whitelist": []}
+        cmd = {
+            "list": "blacklist",
+            "domains": ["example.com", "test.org", "initial.com", "invalid"],
+        }
+
+        result = self.daemon._cmd_add_domains(cmd)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("example.com", result["lists"]["blacklist"])
+        self.assertIn("test.org", result["lists"]["blacklist"])
+        self.assertIn("initial.com", result["lists"]["blacklist"])
+        self.assertNotIn("invalid", result["lists"]["blacklist"])
+        # initial.com was already there, example.com and test.org are new. invalid is invalid.
+        self.assertEqual(result["message"], "Added 2 domains to blacklist.")
+        mock_save.assert_called_once()
+
+        # 2. Invalid list name
+        mock_save.reset_mock()
+        cmd = {"list": "invalid_list", "domains": ["a.com"]}
+        result = self.daemon._cmd_add_domains(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Invalid list name.")
+        mock_save.assert_not_called()
+
+        # 3. Active session
+        self.daemon.active = True
+        cmd = {"list": "blacklist", "domains": ["a.com"]}
+        result = self.daemon._cmd_add_domains(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Cannot modify lists during active session.")
+        self.daemon.active = False
 
     @patch("forcefocus_daemon.ForcedFocusDaemon._save_lists")
     @patch("forcefocus_daemon.ForcedFocusDaemon._load_lists")
@@ -110,6 +148,7 @@ class TestForcedFocusDaemon(unittest.TestCase):
         mock_enforce.assert_called_once()
         mock_write.assert_called_once()
 
+    @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     @patch(
         "forcefocus_daemon.subprocess.run",
         side_effect=Exception("Test cleanup exception"),
@@ -120,6 +159,7 @@ class TestForcedFocusDaemon(unittest.TestCase):
     @patch("forcefocus_daemon.ForcedFocusDaemon._send_mac_notification")
     def test_cleanup_session_error_handling(
         self, mock_notif, mock_lock, mock_sound, mock_log_error, mock_run
+        self, mock_lock, mock_sound, mock_log_error, mock_run, mock_notify
     ):
         self.daemon.active = True
         self.daemon.mode = "blacklist"
@@ -128,8 +168,17 @@ class TestForcedFocusDaemon(unittest.TestCase):
         self.daemon._cleanup_session()
 
         self.assertFalse(self.daemon.active)
-        mock_log_error.assert_called_once()
-        self.assertIn("cleanup_session error", mock_log_error.call_args[0][0])
+        # Should be called at least once since _cleanup_session logs errors
+        self.assertTrue(mock_log_error.called)
+
+        # Check that one of the calls was for cleanup_session error
+        found = False
+        for call in mock_log_error.call_args_list:
+            if "cleanup_session error" in call[0][0]:
+                found = True
+                break
+        self.assertTrue(found)
+
         mock_lock.unlink.assert_called_once_with(missing_ok=True)
         self.assertEqual(self.daemon.session_expiry, None)
         self.assertEqual(self.daemon.mode, "blacklist")

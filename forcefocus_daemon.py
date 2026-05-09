@@ -20,6 +20,7 @@ import hmac
 import logging
 import threading
 import subprocess
+import concurrent.futures
 import mimetypes
 import re
 from pathlib import Path
@@ -1642,14 +1643,25 @@ class ForcedFocusDaemon:
         result = {}
         try:
             services = self._get_network_services()
-            for svc in services:
+
+            def get_dns(svc):
                 dns_out = subprocess.run(
                     ["networksetup", "-getdnsservers", svc],
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
-                result[svc] = dns_out.stdout.strip()
+                return svc, dns_out.stdout.strip()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(services) if services else 1)) as executor:
+                futures = {executor.submit(get_dns, svc): svc for svc in services}
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        svc, dns = future.result()
+                        result[svc] = dns
+                    except Exception as e:
+                        svc = futures[future]
+                        logging.error("Failed to get DNS servers for %s: %s", svc, e)
         except Exception as exc:
             logging.error("Failed to get DNS servers: %s", exc)
         return result
@@ -2453,51 +2465,60 @@ class ForcedFocusDaemon:
             tamper_count = 0
             fix_count = 0
 
-            for svc in services:
+            def verify_and_fix(svc):
                 dns_result = subprocess.run(
                     ["networksetup", "-getdnsservers", svc],
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
+                return svc, dns_result
 
-                if dns_result.returncode != 0:
-                    logging.warning(
-                        "Failed to get DNS for service '%s': %s",
-                        svc,
-                        dns_result.stderr if dns_result.stderr else "unknown error",
-                    )
-                    continue
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(services) if services else 1)) as executor:
+                futures = {executor.submit(verify_and_fix, svc): svc for svc in services}
+                for future in concurrent.futures.as_completed(futures):
+                    svc = futures[future]
+                    try:
+                        _, dns_result = future.result()
+                        if dns_result.returncode != 0:
+                            logging.warning(
+                                "Failed to get DNS for service '%s': %s",
+                                svc,
+                                dns_result.stderr if dns_result.stderr else "unknown error",
+                            )
+                            continue
 
-                current_dns = dns_result.stdout.strip()
-                if (
-                    "127.0.0.1" not in current_dns
-                    and "::1" not in current_dns
-                    and "aren't any" not in current_dns.lower()
-                ):
-                    logging.warning(
-                        "DNS TAMPER on '%s': '%s' — re-enforcing.", svc, current_dns
-                    )
-                    tamper_count += 1
+                        current_dns = dns_result.stdout.strip()
+                        if (
+                            "127.0.0.1" not in current_dns
+                            and "::1" not in current_dns
+                            and "aren't any" not in current_dns.lower()
+                        ):
+                            logging.warning(
+                                "DNS TAMPER on '%s': '%s' — re-enforcing.", svc, current_dns
+                            )
+                            tamper_count += 1
 
-                    fix_result = subprocess.run(
-                        ["networksetup", "-setdnsservers", svc, "127.0.0.1", "::1"],
-                        capture_output=True,
-                        timeout=5,
-                    )
+                            fix_result = subprocess.run(
+                                ["networksetup", "-setdnsservers", svc, "127.0.0.1", "::1"],
+                                capture_output=True,
+                                timeout=5,
+                            )
 
-                    if fix_result.returncode == 0:
-                        fix_count += 1
-                    else:
-                        logging.error(
-                            "Failed to fix DNS for service '%s': %s",
-                            svc,
-                            (
-                                fix_result.stderr.decode()
-                                if fix_result.stderr
-                                else "unknown error"
-                            ),
-                        )
+                            if fix_result.returncode == 0:
+                                fix_count += 1
+                            else:
+                                logging.error(
+                                    "Failed to fix DNS for service '%s': %s",
+                                    svc,
+                                    (
+                                        fix_result.stderr.decode()
+                                        if fix_result.stderr
+                                        else "unknown error"
+                                    ),
+                                )
+                    except Exception as e:
+                        logging.error("DNS verify error for service '%s': %s", svc, e)
 
             if tamper_count > 0:
                 logging.info(
