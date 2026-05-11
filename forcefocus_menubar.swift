@@ -279,12 +279,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
     }
     
     func showNotification(title: String, message: String) {
-        // Using modern UserNotifications framework would require more complex setup
-        // For now, we'll use the system beep as an alternative notification
-        NSSound(named: "Ping")?.play()
-        
-        // Log to console for debugging purposes
-        print("Notification: \(title) - \(message)")
+        // Use osascript to show a native macOS notification linked to this app.
+        // This mirrors the daemon's _send_mac_notification approach for consistency.
+        let script = """
+        on run argv
+          set msg to item 1 of argv
+          set t to item 2 of argv
+          display notification msg with title t sound name "Glass"
+        end run
+        """
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script, message, title]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
     }
 }
 

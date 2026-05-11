@@ -510,7 +510,6 @@ function initEvents() {
     try {
       const res = await api("POST", "/api/start", payload);
       if (res.status === "ok") {
-        AudioManager.play("start");
         refresh();
       } else {
         alert(res.message || "Failed to start");
@@ -540,7 +539,6 @@ function initEvents() {
         session_type: "rescue",
       });
       if (res.status === "ok") {
-        AudioManager.play("rescue");
         refresh();
       }
     } finally {

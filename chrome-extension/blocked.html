@@ -199,6 +199,22 @@
         }
       }
 
+      // Play blocked-site sound (activates the sound_blocked setting)
+      (async () => {
+        try {
+          const res = await fetch("http://127.0.0.1:7070/api/settings");
+          const data = await res.json();
+          const file = data?.settings?.sound_blocked;
+          if (file) {
+            const audio = new Audio("http://127.0.0.1:7070/sounds/" + encodeURIComponent(file));
+            audio.volume = 0.6;
+            audio.play().catch(() => {});
+          }
+        } catch (e) {
+          // Daemon unreachable — skip sound silently
+        }
+      })();
+
       updateTimer();
       // P3: Poll every 2s instead of 1s to reduce daemon load
       timerPoll = setInterval(updateTimer, 2000);

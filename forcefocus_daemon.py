@@ -1314,6 +1314,20 @@ class ForcedFocusDaemon:
                 mode,
                 self.session_expiry.strftime("%H:%M:%S"),
             )
+            # Centralized sound + notification for ALL session starts
+            if self.session_type == "rescue":
+                self._play_sound("rescue")
+                self._send_mac_notification(
+                    "Rescue Mode",
+                    f"All sites blocked for {duration_minutes} min. Stay focused!",
+                )
+            else:
+                self._play_sound("start")
+                self._send_mac_notification(
+                    "Session Started",
+                    msg,
+                    subtitle=self.session_expiry.strftime("Expires at %H:%M"),
+                )
             self.state_changed.set()
             return {
                 "status": "ok",
@@ -1362,6 +1376,7 @@ class ForcedFocusDaemon:
             )
             self._mono_unlock_end = get_continuous_time() + DELAYED_UNLOCK_S
             self._persist_session_lock()
+            self._play_sound("unlock")
             self.state_changed.set()
             unlock_str = self.pending_unlock_at.strftime("%H:%M:%S")
             logging.info("Delayed unlock requested — scheduled at %s.", unlock_str)
@@ -2578,6 +2593,10 @@ class ForcedFocusDaemon:
         if cmd_to_start:
             logging.info("Scheduled time reached. Automatically starting session.")
             self._play_sound("scheduled")
+            self._send_mac_notification(
+                "Scheduled Session",
+                "Your scheduled focus session is starting now.",
+            )
             self._start_session(cmd_to_start)
             return
 

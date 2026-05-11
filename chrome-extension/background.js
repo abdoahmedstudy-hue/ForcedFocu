@@ -590,11 +590,10 @@ async function syncBlockRules(status = null) {
 // Two-layer redirect system that catches cases where /etc/hosts blocks the
 // domain before DNR rules can fire (causing ERR_CONNECTION_REFUSED).
 
-/**
- * Layer 1: Intercept navigations BEFORE Chrome connects.
- * This fires before DNS resolution, so it catches navigations even when
- * /etc/hosts would block them. Provides instant redirects with zero delay.
- */
+// Track recent notifications to debounce (prevent spam from rapid navigations)
+const _notifiedDomains = new Map();
+const NOTIF_DEBOUNCE_MS = 3000;
+
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   // Only intercept top-level navigations (not iframes, etc.)
   if (details.frameId !== 0) return;
@@ -611,6 +610,20 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 
     chrome.tabs.update(details.tabId, { url: blockedUrl });
     log(`[R1] Pre-navigation redirect: ${hostname} → blocked.html`);
+
+    // Chrome notification (debounced per domain)
+    const now = Date.now();
+    const lastNotif = _notifiedDomains.get(hostname) || 0;
+    if (now - lastNotif > NOTIF_DEBOUNCE_MS) {
+      _notifiedDomains.set(hostname, now);
+      chrome.notifications.create(`blocked-${hostname}`, {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "Site Blocked",
+        message: `${hostname} is blocked by ForcedFocus. Stay focused!`,
+        priority: 0,
+      });
+    }
   }
 });
 

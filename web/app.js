@@ -978,7 +978,6 @@ function initEvents() {
     try {
       const res = await api("POST", "/api/start", payload);
       if (res.status === "ok") {
-        AudioManager.play("rescue");
         showToast(res.message);
         refreshStatus();
       } else {
