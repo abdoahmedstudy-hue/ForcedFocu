@@ -474,6 +474,102 @@ def cmd_web(args):
         # In a real implementation, we would find and kill the process.
 
 
+def cmd_perma_block(args):
+    """Manage the permanent blocklist — always-on, session-independent domain blocking."""
+    action = args.action
+
+    if action == "list":
+        resp = send_command({"action": "get_perma_blocklist"})
+        if out.is_agent:
+            out.print_data(resp)
+            return
+
+        domains = resp.get("domains", [])
+        pending = resp.get("pending_unlocks", {})
+
+        if not domains:
+            console.print(
+                Panel(
+                    "[dim]No permanently blocked domains.[/dim]",
+                    title="[error]\U0001f512 Permanent Blocklist[/error]",
+                    border_style="dim",
+                    expand=False,
+                )
+            )
+            return
+
+        table = Table(
+            title="\U0001f512 Permanent Blocklist",
+            header_style="bold red",
+            box=box.ROUNDED,
+        )
+        table.add_column("Domain", style="bold")
+        table.add_column("Status", justify="center")
+        table.add_column("Timer", justify="right")
+
+        for domain in domains:
+            if domain in pending:
+                rem = pending[domain].get("remaining_seconds", 0)
+                m, s = divmod(rem, 60)
+                table.add_row(
+                    domain,
+                    "[warning]\u23F3 PENDING UNBLOCK[/warning]",
+                    f"[warning]{m}m {s:02d}s[/warning]",
+                )
+            else:
+                table.add_row(domain, "[error]\U0001f512 LOCKED[/error]", "[dim]—[/dim]")
+
+        console.print(table)
+        console.print(
+            f"\n[dim]  {len(domains)} domain(s) permanently blocked, "
+            f"{len(pending)} pending unblock(s).[/dim]\n"
+        )
+
+    elif action == "add":
+        domains = args.domains
+        if not domains:
+            out.print_error(
+                "At least one domain is required.", code="USAGE_ERROR"
+            )
+
+        resp = send_command({"action": "add_perma_block", "domains": domains})
+        out.print_data(resp, title="\U0001f512 Permanent Block")
+
+    elif action == "unblock":
+        domain = args.domain
+        if not domain:
+            out.print_error("Domain is required for 'unblock'.", code="USAGE_ERROR")
+
+        key = args.key
+        if not key:
+            if out.is_agent:
+                out.print_error(
+                    "Kill-switch passphrase required for agent mode.",
+                    code="MISSING_KEY",
+                )
+            key = getpass.getpass("\U0001f510 Kill-switch passphrase: ")
+
+        if out.is_human:
+            with console.status("[info]Verifying passphrase...[/info]"):
+                resp = send_command(
+                    {"action": "request_perma_unblock", "domain": domain, "key": key}
+                )
+        else:
+            resp = send_command(
+                {"action": "request_perma_unblock", "domain": domain, "key": key}
+            )
+
+        out.print_data(resp, title="\U0001f512 Permanent Unblock")
+
+    elif action == "cancel":
+        domain = args.domain
+        if not domain:
+            out.print_error("Domain is required for 'cancel'.", code="USAGE_ERROR")
+
+        resp = send_command({"action": "cancel_perma_unblock", "domain": domain})
+        out.print_data(resp, title="\U0001f512 Cancel Unblock")
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ARGUMENT PARSER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -631,6 +727,30 @@ def build_parser():
     p_groups.add_argument("domains", nargs="*", help="Domains for 'add'")
     p_groups.set_defaults(func=cmd_groups)
 
+    # perma-block
+    p_perma = sub.add_parser(
+        "perma-block", help="Manage permanent blocklist (always-on, session-independent)"
+    )
+    p_perma.add_argument(
+        "--human", "-H", action="store_true", help="Force human-friendly output"
+    )
+    p_perma.add_argument(
+        "--agent", "-A", action="store_true", help="Force agent-friendly output"
+    )
+    p_perma.add_argument(
+        "action",
+        choices=["list", "add", "unblock", "cancel"],
+        help="Permanent block action",
+    )
+    p_perma.add_argument(
+        "domain", nargs="?", help="Domain for 'unblock' or 'cancel'"
+    )
+    p_perma.add_argument(
+        "domains", nargs="*", help="Domain(s) for 'add'"
+    )
+    p_perma.add_argument("--key", "-k", help="Kill-switch passphrase (for unblock)")
+    p_perma.set_defaults(func=cmd_perma_block)
+
     return parser
 
 
@@ -673,6 +793,7 @@ def print_rich_help(parser):
         "set-key": "Set/change the kill-switch passphrase",
         "web": "Manage the web interface",
         "groups": "Manage domain groups",
+        "perma-block": "Manage permanent blocklist (always-on)",
     }
     for cmd, desc in commands.items():
         table.add_row(cmd, desc)

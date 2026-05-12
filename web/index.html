@@ -332,6 +332,29 @@
               </div>
             </div>
 
+            <!-- Permanent Block -->
+            <div class="card list-card perma-block-card" style="grid-column: 1 / -1; margin-bottom: 0">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🔒</span> Permanent Block
+                </h2>
+                <span class="list-count" id="permaBlockCount">0</span>
+              </div>
+              <p class="list-desc">
+                Blocked at all times — even without an active session.
+                Removal requires your passphrase and a 30-minute waiting period.
+              </p>
+              <div class="add-domain">
+                <label for="permaBlockInput" class="sr-only">Domains to permanently block</label>
+                <textarea id="permaBlockInput" placeholder="e.g. tiktok.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add perma-add-btn" id="btnAddPermaBlock" aria-label="Add to permanent block">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="permaBlockDomains"></ul>
+            </div>
+
             <!-- Blacklist -->
             <div class="card list-card">
               <div class="list-header">

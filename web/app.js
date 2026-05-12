@@ -112,6 +112,9 @@ const els = {
   rescueDuration: $("#rescueDuration"),
   btnRescue: $("#btnRescue"),
   sessionGroups: $("#sessionGroups"),
+  permaBlockInput: $("#permaBlockInput"),
+  permaBlockDomains: $("#permaBlockDomains"),
+  permaBlockCount: $("#permaBlockCount"),
 };
 
 // ── API Helpers ──────────────────────────────────────────────────────────────
@@ -598,6 +601,259 @@ function renderDomainList(container, domains, listName) {
   });
 }
 
+// ── Permanent Blocklist ──────────────────────────────────────────────────────
+
+let permaCountdownInterval = null;
+let permaCountdownData = {}; // domain → { remaining, el }
+
+async function refreshPermaBlocklist() {
+  const data = await api("GET", "/api/perma-blocklist");
+  if (data.status !== "ok") return;
+
+  els.permaBlockCount.textContent = (data.domains || []).length;
+  renderPermaBlocklist(
+    els.permaBlockDomains,
+    data.domains || [],
+    data.pending_unlocks || {},
+  );
+}
+
+function renderPermaBlocklist(container, domains, pendingUnlocks) {
+  container.innerHTML = "";
+  permaCountdownData = {};
+
+  if (!domains || domains.length === 0) {
+    const li = document.createElement("li");
+    li.style.justifyContent = "center";
+    li.style.padding = "16px";
+    li.style.color = "var(--text-muted)";
+    li.style.fontSize = "13px";
+    li.style.fontStyle = "italic";
+    li.style.background = "transparent";
+    li.style.border = "1px dashed var(--border)";
+    li.style.borderRadius = "8px";
+    li.textContent = "No permanently blocked domains.";
+    container.appendChild(li);
+    stopPermaCountdown();
+    return;
+  }
+
+  let hasCountdown = false;
+  domains.forEach((domain) => {
+    const li = document.createElement("li");
+    li.classList.add("perma-domain-item");
+
+    const leftSpan = document.createElement("span");
+    leftSpan.classList.add("perma-domain-name");
+
+    const pending = pendingUnlocks[domain];
+    if (pending && pending.remaining_seconds > 0) {
+      hasCountdown = true;
+      // Pending unblock state
+      li.classList.add("perma-pending");
+
+      const nameEl = document.createElement("span");
+      nameEl.textContent = domain;
+      leftSpan.appendChild(nameEl);
+
+      const timerBadge = document.createElement("span");
+      timerBadge.classList.add("perma-timer-badge");
+      timerBadge.textContent = formatCountdown(pending.remaining_seconds);
+      leftSpan.appendChild(timerBadge);
+
+      permaCountdownData[domain] = {
+        remaining: pending.remaining_seconds,
+        el: timerBadge,
+      };
+
+      // Cancel unblock button
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "perma-cancel-btn";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.setAttribute("aria-label", `Cancel unblock for ${domain}`);
+      cancelBtn.addEventListener("click", () => cancelPermaUnblock(domain));
+
+      li.appendChild(leftSpan);
+      li.appendChild(cancelBtn);
+    } else {
+      // Locked state
+      const lockIcon = document.createElement("span");
+      lockIcon.textContent = "\uD83D\uDD12";
+      lockIcon.style.marginRight = "8px";
+      lockIcon.style.fontSize = "11px";
+      leftSpan.appendChild(lockIcon);
+
+      const nameEl = document.createElement("span");
+      nameEl.textContent = domain;
+      leftSpan.appendChild(nameEl);
+
+      // Unblock button (triggers passphrase flow)
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "remove-btn perma-unblock-btn";
+      removeBtn.textContent = "\u2715";
+      removeBtn.setAttribute("aria-label", `Unblock ${domain}`);
+      removeBtn.addEventListener("click", () => requestPermaUnblock(domain));
+
+      li.appendChild(leftSpan);
+      li.appendChild(removeBtn);
+    }
+    container.appendChild(li);
+  });
+
+  if (hasCountdown) startPermaCountdown();
+  else stopPermaCountdown();
+}
+
+function formatCountdown(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+function startPermaCountdown() {
+  if (permaCountdownInterval) return;
+  permaCountdownInterval = setInterval(() => {
+    let allDone = true;
+    for (const [domain, info] of Object.entries(permaCountdownData)) {
+      info.remaining = Math.max(0, info.remaining - 1);
+      if (info.el) info.el.textContent = formatCountdown(info.remaining);
+      if (info.remaining > 0) allDone = false;
+    }
+    if (allDone) {
+      stopPermaCountdown();
+      refreshPermaBlocklist();
+    }
+  }, 1000);
+}
+
+function stopPermaCountdown() {
+  if (permaCountdownInterval) {
+    clearInterval(permaCountdownInterval);
+    permaCountdownInterval = null;
+  }
+}
+
+async function addPermaBlock() {
+  const input = els.permaBlockInput;
+  const btn = $("#btnAddPermaBlock");
+  const raw = input.value.trim();
+  if (!raw) return;
+
+  if (btn) btn.disabled = true;
+  try {
+    const lines = raw
+      .split(/[\n\r]+/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const domains = [];
+    const invalid = [];
+
+    for (const line of lines) {
+      const domain = extractDomain(line);
+      if (/^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,}$/.test(domain)) {
+        domains.push(domain);
+      } else {
+        invalid.push(line);
+      }
+    }
+
+    if (domains.length === 0) {
+      showToast("Invalid domain. Example: tiktok.com");
+      return;
+    }
+
+    if (invalid.length > 0) {
+      showToast(
+        `Skipped ${invalid.length} invalid: ${invalid.slice(0, 3).join(", ")}`,
+      );
+    }
+
+    const res = await api("POST", "/api/perma-blocklist", {
+      domains: domains,
+    });
+    if (res.status === "ok") {
+      input.value = "";
+      showToast(`\uD83D\uDD12 Permanently blocked ${domains.length} domain(s)`);
+      refreshPermaBlocklist();
+    } else {
+      showToast("Error: " + res.message);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function requestPermaUnblock(domain) {
+  // Reuse the stop modal for passphrase entry
+  const modal = els.stopModal;
+  const input = els.passphraseInput;
+  const error = els.modalError;
+
+  modal.classList.remove("hidden");
+  input.value = "";
+  if (error) error.textContent = "";
+  input.focus();
+
+  // Replace modal title/description temporarily
+  const modalEl = modal.querySelector(".modal");
+  const origTitle = modalEl.querySelector("h2").textContent;
+  const origDesc = modalEl.querySelector("p").textContent;
+  modalEl.querySelector("h2").textContent = "\uD83D\uDD12 Unblock " + domain;
+  modalEl.querySelector("p").textContent =
+    "Enter your passphrase to start the 30-minute unblock timer.";
+
+  // Override confirm button
+  const confirmBtn = modalEl.querySelector(".btn-confirm");
+  const origConfirmText = confirmBtn.textContent;
+  confirmBtn.textContent = "Start Unblock Timer";
+
+  const cleanup = () => {
+    modalEl.querySelector("h2").textContent = origTitle;
+    modalEl.querySelector("p").textContent = origDesc;
+    confirmBtn.textContent = origConfirmText;
+    confirmBtn.onclick = null;
+    modal.classList.add("hidden");
+  };
+
+  confirmBtn.onclick = async () => {
+    const key = input.value;
+    if (!key) {
+      if (error) error.textContent = "Please enter your passphrase.";
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Verifying...";
+    try {
+      const res = await api("POST", "/api/perma-blocklist/unblock", {
+        domain,
+        key,
+      });
+      if (res.status === "pending") {
+        cleanup();
+        showToast(`\u23F3 Unblock timer started for ${domain} (30 min)`);
+        refreshPermaBlocklist();
+      } else if (res.status === "error") {
+        if (error) error.textContent = res.message;
+      }
+    } finally {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Start Unblock Timer";
+    }
+  };
+}
+
+async function cancelPermaUnblock(domain) {
+  const res = await api("POST", "/api/perma-blocklist/cancel-unblock", {
+    domain,
+  });
+  if (res.status === "ok") {
+    showToast(`\uD83D\uDD12 Re-locked ${domain}`);
+    refreshPermaBlocklist();
+  } else {
+    showToast("Error: " + res.message);
+  }
+}
+
 // ── Intent Tasks ─────────────────────────────────────────────────────────────
 
 function renderIntentTasks(container, tasks) {
@@ -1062,6 +1318,15 @@ function initEvents() {
     }
   });
 
+  // Add domain: permanent block
+  $("#btnAddPermaBlock").addEventListener("click", () => addPermaBlock());
+  els.permaBlockInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      addPermaBlock();
+    }
+  });
+
   // R5: Close modal on Escape key
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !els.stopModal.classList.contains("hidden")) {
@@ -1178,6 +1443,7 @@ async function init() {
   await loadApiToken();
   await refreshStatus();
   await refreshLists();
+  await refreshPermaBlocklist();
   await refreshGroups();
   await loadSettings();
 

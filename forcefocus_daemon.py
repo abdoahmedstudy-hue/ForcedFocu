@@ -73,6 +73,7 @@ WEB_PORT = 7070
 _local_web = Path(__file__).resolve().parent / "web"
 WEB_DIR = _local_web if _local_web.exists() else Path("/usr/local/share/forcefocus/web")
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
+PERMA_BLOCK_FILE = CONFIG_DIR / "perma_blocklist.json"
 
 DEFAULT_SETTINGS = {
     "sound_start": "Start Blocking.mp3",
@@ -88,10 +89,13 @@ DEFAULT_SETTINGS = {
 
 MARKER_BEGIN = "# ──── BEGIN FORCEFOCUS ────"
 MARKER_END = "# ──── END FORCEFOCUS ────"
+PERMA_MARKER_BEGIN = "# ──── BEGIN FORCEFOCUS PERMANENT ────"
+PERMA_MARKER_END = "# ──── END FORCEFOCUS PERMANENT ────"
 
 WATCHDOG_INTERVAL = 0.25
 SOCKET_TIMEOUT = 1.0
 DELAYED_UNLOCK_S = 20 * 60
+PERMA_UNLOCK_DELAY_S = 30 * 60  # 30 minutes to unblock a permanently blocked domain
 
 # Subdomains to auto-resolve in whitelist mode
 WHITELIST_PREFIXES = ["", "www.", "m.", "api.", "cdn.", "static."]
@@ -560,6 +564,11 @@ class ForcedFocusDaemon:
         self._reenforce_flag = False  # Set by signal handler, handled by watchdog
         self.schedules: list = []
         self.settings = self._load_settings()
+        # Permanent blocklist state (independent from session blacklist)
+        self.perma_blocklist: list[str] = []
+        self.perma_pending_unlocks: dict[str, datetime] = {}  # domain → unlock-ready-at
+        self._mono_perma_unlock_ends: dict[str, float] = {}  # domain → monotonic anchor
+        self._perma_hosts_hash: str | None = None  # SHA256 of permanent block in /etc/hosts
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -569,8 +578,13 @@ class ForcedFocusDaemon:
         self._ensure_config_dir()
         self._ensure_lists_file()
         self._ensure_groups_file()
+        self._ensure_perma_blocklist_file()
         self._generate_api_token()
         self._install_signal_handlers()
+        # Load permanent blocklist and enforce immediately (before session restore)
+        self._load_perma_state()
+        if self.perma_blocklist:
+            self._enforce_perma_block()
         # Restore session BEFORE starting watchdog to avoid race (C2)
         with self.lock:
             self._restore_session()
@@ -601,6 +615,14 @@ class ForcedFocusDaemon:
         if not GROUPS_FILE.exists():
             GROUPS_FILE.write_text(json.dumps({}, indent=2))
             os.chmod(str(GROUPS_FILE), 0o644)
+
+    @staticmethod
+    def _ensure_perma_blocklist_file():
+        if not PERMA_BLOCK_FILE.exists():
+            PERMA_BLOCK_FILE.write_text(
+                json.dumps({"domains": [], "pending_unlocks": {}}, indent=2)
+            )
+            os.chmod(str(PERMA_BLOCK_FILE), 0o644)
 
     def _generate_api_token(self):
         """Generate a per-launch API token for HTTP mutation endpoint auth."""
@@ -686,6 +708,285 @@ class ForcedFocusDaemon:
 
     def _save_groups(self, groups: dict):
         self._atomic_write_json(GROUPS_FILE, groups, indent=2)
+
+    # ── Permanent Blocklist Management ────────────────────────────────────────
+
+    def _load_perma_state(self):
+        """Load permanent blocklist from disk into memory, restoring pending unlocks."""
+        try:
+            if not PERMA_BLOCK_FILE.exists():
+                return
+            data = json.loads(PERMA_BLOCK_FILE.read_text())
+            self.perma_blocklist = data.get("domains", [])
+            now_mono = get_continuous_time()
+            raw_pending = data.get("pending_unlocks", {})
+            for domain, info in raw_pending.items():
+                try:
+                    unlocks_at = datetime.fromisoformat(info["unlocks_at"])
+                    remaining = (unlocks_at - datetime.now()).total_seconds()
+                    if remaining <= 0:
+                        # Timer expired during downtime — remove domain
+                        if domain in self.perma_blocklist:
+                            self.perma_blocklist.remove(domain)
+                        logging.info(
+                            "Permanent unblock for '%s' completed during downtime.", domain
+                        )
+                    else:
+                        self.perma_pending_unlocks[domain] = unlocks_at
+                        self._mono_perma_unlock_ends[domain] = now_mono + remaining
+                except (KeyError, ValueError) as exc:
+                    logging.warning(
+                        "Invalid pending unlock entry for '%s': %s", domain, exc
+                    )
+            # Save cleaned state back
+            self._save_perma_state()
+            if self.perma_blocklist:
+                logging.info(
+                    "Permanent blocklist loaded: %d domains, %d pending unlocks.",
+                    len(self.perma_blocklist),
+                    len(self.perma_pending_unlocks),
+                )
+        except Exception as exc:
+            logging.error("Failed to load permanent blocklist: %s", exc)
+
+    def _save_perma_state(self):
+        """Persist permanent blocklist and pending unlocks to disk."""
+        pending = {}
+        for domain, unlocks_at in self.perma_pending_unlocks.items():
+            pending[domain] = {
+                "requested_at": (
+                    unlocks_at - timedelta(seconds=PERMA_UNLOCK_DELAY_S)
+                ).isoformat(),
+                "unlocks_at": unlocks_at.isoformat(),
+            }
+        data = {"domains": self.perma_blocklist, "pending_unlocks": pending}
+        try:
+            self._atomic_write_json(PERMA_BLOCK_FILE, data, indent=2)
+        except Exception as exc:
+            logging.error("Failed to save permanent blocklist: %s", exc)
+
+    def _cmd_get_perma_blocklist(self) -> dict:
+        """Return permanent blocklist and pending unlock status."""
+        now_mono = get_continuous_time()
+        pending = {}
+        for domain, unlocks_at in self.perma_pending_unlocks.items():
+            mono_end = self._mono_perma_unlock_ends.get(domain, 0)
+            remaining = int(max(0, mono_end - now_mono))
+            pending[domain] = {
+                "unlocks_at": unlocks_at.strftime("%H:%M:%S"),
+                "remaining_seconds": remaining,
+            }
+        return {
+            "status": "ok",
+            "domains": self.perma_blocklist,
+            "pending_unlocks": pending,
+        }
+
+    def _cmd_add_perma_block(self, cmd: dict) -> dict:
+        """Add domain(s) to the permanent blocklist. Can be done anytime."""
+        domains_raw = cmd.get("domains", [])
+        single = cmd.get("domain", "")
+        if single:
+            domains_raw = [single]
+        if not domains_raw:
+            return {"status": "error", "message": "No domains provided."}
+
+        with self.lock:
+            added = 0
+            for d in domains_raw:
+                domain = d.strip().lower()
+                if not self._validate_domain(domain):
+                    continue
+                if domain not in self.perma_blocklist:
+                    self.perma_blocklist.append(domain)
+                    added += 1
+            if added == 0:
+                return {"status": "error", "message": "No valid new domains to add."}
+            self._save_perma_state()
+            self._enforce_perma_block()
+            self.state_changed.set()
+            logging.info("Added %d domain(s) to permanent blocklist.", added)
+            return {
+                "status": "ok",
+                "message": f"Added {added} domain(s) to permanent blocklist.",
+                "domains": self.perma_blocklist,
+            }
+
+    def _cmd_request_perma_unblock(self, cmd: dict) -> dict:
+        """Request removal of a domain from permanent blocklist (passphrase + 30m delay)."""
+        domain = cmd.get("domain", "").strip().lower()
+        passphrase = cmd.get("key", "")
+        if not domain:
+            return {"status": "error", "message": "No domain specified."}
+
+        with self.lock:
+            if domain not in self.perma_blocklist:
+                return {"status": "error", "message": f"'{domain}' is not permanently blocked."}
+
+            # Check if already pending
+            if domain in self.perma_pending_unlocks:
+                now_mono = get_continuous_time()
+                mono_end = self._mono_perma_unlock_ends.get(domain, 0)
+                rem = int(max(0, mono_end - now_mono))
+                if rem > 0:
+                    return {
+                        "status": "pending",
+                        "message": f"Unblock already pending. {rem // 60}m {rem % 60}s remaining.",
+                        "remaining_seconds": rem,
+                    }
+
+            # Rate limit passphrase attempts (reuse session rate limiter)
+            now_mono_rl = time.monotonic()
+            if self._passphrase_attempts >= 5:
+                cooldown = min(60, 2 ** (self._passphrase_attempts - 5))
+                elapsed = now_mono_rl - self._last_attempt_time
+                if elapsed < cooldown:
+                    wait = int(cooldown - elapsed)
+                    return {
+                        "status": "error",
+                        "message": f"Too many attempts. Wait {wait}s.",
+                    }
+            self._last_attempt_time = now_mono_rl
+
+            if not self._verify_passphrase(passphrase):
+                self._passphrase_attempts += 1
+                logging.warning(
+                    "Invalid passphrase for permanent unblock attempt (#%d).",
+                    self._passphrase_attempts,
+                )
+                return {"status": "error", "message": "Invalid passphrase."}
+
+            # Reset rate limiter on success
+            self._passphrase_attempts = 0
+
+            # Start 30-minute cooldown
+            unlocks_at = datetime.now() + timedelta(seconds=PERMA_UNLOCK_DELAY_S)
+            self.perma_pending_unlocks[domain] = unlocks_at
+            self._mono_perma_unlock_ends[domain] = (
+                get_continuous_time() + PERMA_UNLOCK_DELAY_S
+            )
+            self._save_perma_state()
+            self.state_changed.set()
+            unlock_str = unlocks_at.strftime("%H:%M:%S")
+            logging.info(
+                "Permanent unblock requested for '%s' — unlocks at %s.",
+                domain,
+                unlock_str,
+            )
+            return {
+                "status": "pending",
+                "message": f"Unblock request accepted. '{domain}' will be removed at {unlock_str} (30-min delay).",
+                "unlocks_at": unlock_str,
+                "remaining_seconds": PERMA_UNLOCK_DELAY_S,
+            }
+
+    def _cmd_cancel_perma_unblock(self, cmd: dict) -> dict:
+        """Cancel a pending permanent unblock — re-lock the domain immediately."""
+        domain = cmd.get("domain", "").strip().lower()
+        if not domain:
+            return {"status": "error", "message": "No domain specified."}
+
+        with self.lock:
+            if domain not in self.perma_pending_unlocks:
+                return {
+                    "status": "error",
+                    "message": f"No pending unblock for '{domain}'.",
+                }
+            del self.perma_pending_unlocks[domain]
+            self._mono_perma_unlock_ends.pop(domain, None)
+            self._save_perma_state()
+            self.state_changed.set()
+            logging.info("Cancelled permanent unblock for '%s'.", domain)
+            return {
+                "status": "ok",
+                "message": f"Unblock cancelled. '{domain}' remains permanently blocked.",
+            }
+
+    # ── Permanent Block Enforcement ───────────────────────────────────────────
+
+    def _enforce_perma_block(self):
+        """Write permanent block entries to /etc/hosts using PERMA markers (independent from session)."""
+        if not self.perma_blocklist:
+            # No domains to block — remove any stale permanent markers
+            try:
+                subprocess.run(
+                    ["chflags", "nouchg", str(HOSTS_PATH)], capture_output=True, timeout=5
+                )
+                content = self._strip_perma_block(HOSTS_PATH.read_text())
+                HOSTS_PATH.write_text(content)
+                subprocess.run(
+                    ["chflags", "uchg", str(HOSTS_PATH)], capture_output=True, timeout=5
+                )
+                self._perma_hosts_hash = None
+            except Exception as exc:
+                logging.error("_enforce_perma_block (cleanup) failed: %s", exc)
+            return
+
+        try:
+            subprocess.run(
+                ["chflags", "nouchg", str(HOSTS_PATH)], capture_output=True, timeout=5
+            )
+            content = self._strip_perma_block(HOSTS_PATH.read_text())
+            block = self._build_perma_block()
+            content = content.rstrip("\n") + "\n\n" + block + "\n"
+            HOSTS_PATH.write_text(content)
+            subprocess.run(
+                ["chflags", "uchg", str(HOSTS_PATH)], capture_output=True, timeout=5
+            )
+            self._perma_hosts_hash = hashlib.sha256(block.encode()).hexdigest()
+            self._flush_dns()
+            logging.info(
+                "Permanent block enforced: %d domains in /etc/hosts.",
+                len(self.perma_blocklist),
+            )
+        except Exception as exc:
+            logging.error("_enforce_perma_block failed: %s", exc)
+
+    def _build_perma_block(self) -> str:
+        """Build the /etc/hosts block for permanently blocked domains."""
+        lines = [
+            PERMA_MARKER_BEGIN,
+            "# Mode: PERMANENT BLOCK (always active)",
+        ]
+        # Expand domains with common subdomains (same pattern as session blacklist)
+        expanded = set()
+        for d in self.perma_blocklist:
+            domain = d.strip().lower()
+            if not domain or "." not in domain:
+                continue
+            expanded.add(domain)
+            # Subdomain expansion for broader coverage
+            if domain.startswith(COMMON_PREFIXES):
+                for prefix in COMMON_PREFIXES:
+                    if not domain.startswith(prefix):
+                        expanded.add(prefix + domain)
+            else:
+                for prefix in COMMON_PREFIXES:
+                    expanded.add(prefix + domain)
+
+        for domain in sorted(expanded):
+            lines.append(f"127.0.0.1\t{domain}")
+            lines.append(f"::1\t\t{domain}")
+        lines.append(PERMA_MARKER_END)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _strip_perma_block(content: str) -> str:
+        """Remove permanent block markers from hosts content (leaves session markers intact)."""
+        result = []
+        inside = False
+        for line in content.split("\n"):
+            if PERMA_MARKER_BEGIN in line:
+                inside = True
+                continue
+            if PERMA_MARKER_END in line:
+                inside = False
+                continue
+            if not inside:
+                result.append(line)
+        while result and result[-1].strip() == "":
+            result.pop()
+        return "\n".join(result)
 
     @staticmethod
     def _atomic_write_json(path: Path, data: dict, indent=None):
@@ -2048,6 +2349,9 @@ class ForcedFocusDaemon:
         self.state_changed.set()
         # Do NOT clear schedules on session cleanup!
         logging.info("Session ended. Hosts restored. DNS flushed.")
+        # Re-enforce permanent blocks (session cleanup may have modified /etc/hosts)
+        if self.perma_blocklist:
+            self._enforce_perma_block()
 
     @staticmethod
     def _flush_dns():
@@ -2616,6 +2920,44 @@ class ForcedFocusDaemon:
                     except Exception as exc:
                         logging.error("Signal re-enforce failed: %s", exc)
 
+            # ── Permanent Block Watchdog (runs regardless of session state) ──
+            if self.perma_blocklist or self.perma_pending_unlocks:
+                now_mono_perma = get_continuous_time()
+
+                # Process pending permanent unlocks (expire after 30 min)
+                expired = []
+                for domain, mono_end in list(self._mono_perma_unlock_ends.items()):
+                    if now_mono_perma >= mono_end:
+                        expired.append(domain)
+                if expired:
+                    for domain in expired:
+                        if domain in self.perma_blocklist:
+                            self.perma_blocklist.remove(domain)
+                        self.perma_pending_unlocks.pop(domain, None)
+                        self._mono_perma_unlock_ends.pop(domain, None)
+                        logging.info(
+                            "Permanent unblock completed: '%s' removed from blocklist.",
+                            domain,
+                        )
+                    self._save_perma_state()
+                    self._enforce_perma_block()
+                    self.state_changed.set()
+
+                # Integrity check: permanent block markers in /etc/hosts (~every 2s)
+                self._wd_perma_counter = getattr(self, "_wd_perma_counter", 0) + 1
+                if self._wd_perma_counter >= 8:  # 8 * 250ms = 2s
+                    self._wd_perma_counter = 0
+                    if self.perma_blocklist and self._perma_hosts_hash:
+                        try:
+                            content = HOSTS_PATH.read_text()
+                            if PERMA_MARKER_BEGIN not in content:
+                                logging.warning(
+                                    "PERMANENT BLOCK TAMPER DETECTED (markers missing). Re-enforcing."
+                                )
+                                self._enforce_perma_block()
+                        except Exception as exc:
+                            logging.error("Watchdog perma hosts check error: %s", exc)
+
             if not self.active:
                 return
 
@@ -2863,6 +3205,14 @@ class ForcedFocusDaemon:
             return self._cmd_add_group(cmd)
         elif action == "remove_group":
             return self._cmd_remove_group(cmd)
+        elif action == "get_perma_blocklist":
+            return self._cmd_get_perma_blocklist()
+        elif action == "add_perma_block":
+            return self._cmd_add_perma_block(cmd)
+        elif action == "request_perma_unblock":
+            return self._cmd_request_perma_unblock(cmd)
+        elif action == "cancel_perma_unblock":
+            return self._cmd_cancel_perma_unblock(cmd)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
@@ -3017,6 +3367,8 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             self._send_json(self.server.daemon_ref._cmd_get_settings())
         elif path == "/api/groups":
             self._send_json(self.server.daemon_ref._cmd_get_groups())
+        elif path == "/api/perma-blocklist":
+            self._send_json(self.server.daemon_ref._cmd_get_perma_blocklist())
         elif path == "/api/token":
             token = getattr(self.server.daemon_ref, "api_token", "")
             self._send_json({"token": token})
@@ -3103,6 +3455,26 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
                 "domains": body.get("domains", []),
             }
             self._send_json(self.server.daemon_ref._cmd_add_group(cmd))
+        elif path == "/api/perma-blocklist":
+            cmd = {
+                "action": "add_perma_block",
+                "domain": body.get("domain", ""),
+                "domains": body.get("domains", []),
+            }
+            self._send_json(self.server.daemon_ref._cmd_add_perma_block(cmd))
+        elif path == "/api/perma-blocklist/unblock":
+            cmd = {
+                "action": "request_perma_unblock",
+                "domain": body.get("domain", ""),
+                "key": body.get("key", ""),
+            }
+            self._send_json(self.server.daemon_ref._cmd_request_perma_unblock(cmd))
+        elif path == "/api/perma-blocklist/cancel-unblock":
+            cmd = {
+                "action": "cancel_perma_unblock",
+                "domain": body.get("domain", ""),
+            }
+            self._send_json(self.server.daemon_ref._cmd_cancel_perma_unblock(cmd))
         else:
             self._send_json({"status": "error", "message": "Unknown endpoint."}, 404)
 
