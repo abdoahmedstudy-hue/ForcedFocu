@@ -1191,10 +1191,12 @@ class ForcedFocusDaemon:
                     end_time = datetime.fromisoformat(sch["end_time"])
                     if end_time <= datetime.now():
                         continue
+                    mono_start = get_continuous_time() + (sch_time - datetime.now()).total_seconds()
                     self.schedules.append(
                         {
                             "start_time": sch_time,
                             "end_time": end_time,
+                            "mono_start": mono_start,
                             "cmd": sch["cmd"],
                         }
                     )
@@ -1453,8 +1455,14 @@ class ForcedFocusDaemon:
                 sch_cmd.pop("schedule_in_minutes", None)
                 sch_cmd.pop("schedule_at_time", None)
 
+                mono_start = get_continuous_time() + (start_time - datetime.now()).total_seconds()
                 self.schedules.append(
-                    {"start_time": start_time, "end_time": end_time, "cmd": sch_cmd}
+                    {
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "mono_start": mono_start,
+                        "cmd": sch_cmd,
+                    }
                 )
                 self.schedules.sort(key=lambda x: x["start_time"])
                 self._persist_session_lock()
@@ -1686,6 +1694,47 @@ class ForcedFocusDaemon:
                 "message": f"Unlock request accepted. Releases at {unlock_str} (20-min delay).",
             }
 
+    def _cmd_cancel_schedule(self, cmd: dict) -> dict:
+        """Cancel an upcoming scheduled session."""
+        with self.lock:
+            if not self.schedules:
+                return {"status": "error", "message": "No scheduled sessions to cancel."}
+                
+            index = cmd.get("index")
+            start_time_iso = cmd.get("start_time_iso")
+            
+            # Helper function to check if cancellation is allowed
+            def _can_cancel(sch):
+                remaining = (sch["start_time"] - datetime.now()).total_seconds()
+                return remaining > 20 * 60
+            
+            if index is not None:
+                try:
+                    idx = int(index)
+                    if 0 <= idx < len(self.schedules):
+                        if not _can_cancel(self.schedules[idx]):
+                            return {"status": "error", "message": "Cannot cancel schedule with 20 minutes or less remaining."}
+                        sch = self.schedules.pop(idx)
+                        self._persist_session_lock()
+                        self.state_changed.set()
+                        return {"status": "ok", "message": f"Cancelled schedule for {sch['start_time'].strftime('%H:%M')}."}
+                    else:
+                        return {"status": "error", "message": "Invalid schedule index."}
+                except ValueError:
+                    return {"status": "error", "message": "Invalid index format."}
+            elif start_time_iso:
+                for i, sch in enumerate(self.schedules):
+                    if sch["start_time"].isoformat() == start_time_iso:
+                        if not _can_cancel(sch):
+                            return {"status": "error", "message": "Cannot cancel schedule with 20 minutes or less remaining."}
+                        self.schedules.pop(i)
+                        self._persist_session_lock()
+                        self.state_changed.set()
+                        return {"status": "ok", "message": f"Cancelled schedule for {sch['start_time'].strftime('%H:%M')}."}
+                return {"status": "error", "message": "Schedule not found."}
+                
+            return {"status": "error", "message": "Must provide index or start_time_iso to cancel."}
+
     def _get_status(self) -> dict:
         with self.lock:
             schedules_res = []
@@ -1693,9 +1742,7 @@ class ForcedFocusDaemon:
                 schedules_res.append(
                     {
                         "starts_at": sch["start_time"].strftime("%Y-%m-%d %I:%M %p"),
-                        "starting_in_seconds": max(
-                            0, int((sch["start_time"] - datetime.now()).total_seconds())
-                        ),
+                        "start_time_iso": sch["start_time"].isoformat(),
                         "mode": sch["cmd"].get("mode", "blacklist"),
                         "session_type": sch["cmd"].get("session_type", "standard"),
                         "duration_minutes": sch["cmd"].get("duration_minutes", 120),
@@ -2883,7 +2930,7 @@ class ForcedFocusDaemon:
         with self.lock:
             if getattr(self, "schedules", []):
                 # Check if the first schedule (sorted by start_time) is ready
-                if datetime.now() >= self.schedules[0]["start_time"]:
+                if get_continuous_time() >= self.schedules[0].get("mono_start", float('inf')):
                     sch = self.schedules.pop(0)
                     cmd_to_start = sch["cmd"]
                     self._persist_session_lock()
@@ -3421,6 +3468,8 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             if "schedule_at" in body:
                 cmd["schedule_at_time"] = body["schedule_at"]
             self._send_json(self.server.daemon_ref._start_session(cmd))
+        elif path == "/api/cancel-schedule":
+            self._send_json(self.server.daemon_ref._cmd_cancel_schedule(body))
         elif path == "/api/intent":
             self._send_json(self.server.daemon_ref._set_intent(body))
         elif path == "/api/settings":

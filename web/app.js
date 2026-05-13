@@ -319,9 +319,9 @@ function setActiveUI(status) {
 
   // Update Upcoming Schedules List (P2: skip if data unchanged)
   if (hasSchedules) {
-    const scheduleJSON = JSON.stringify(schedules);
-    if (scheduleJSON !== _lastScheduleJSON) {
-      _lastScheduleJSON = scheduleJSON;
+    const stableScheduleHash = schedules.map(s => s.start_time_iso + s.mode).join("|");
+    if (stableScheduleHash !== _lastScheduleJSON) {
+      _lastScheduleJSON = stableScheduleHash;
       els.upcomingSchedulesCard.classList.remove("hidden");
       els.upcomingSchedulesCount.textContent = schedules.length;
       els.upcomingSchedulesList.innerHTML = "";
@@ -387,17 +387,57 @@ function setActiveUI(status) {
         calTitle.appendChild(calType);
         const calDuration = document.createElement("div");
         calDuration.className = "cal-duration";
-        calDuration.textContent =
-          "⏳ " + String(sch.duration_minutes || 0) + " mins";
+        if (sch.start_time_iso) {
+          const startMs = new Date(sch.start_time_iso).getTime();
+          calDuration.dataset.startMs = startMs;
+          calDuration.textContent = "⏳ " + formatTime(Math.max(0, Math.floor((startMs - Date.now()) / 1000)));
+        } else {
+          calDuration.textContent = "⏳ " + String(sch.duration_minutes || 0) + " mins";
+        }
         calDetails.appendChild(calTime);
         calDetails.appendChild(calTitle);
         calDetails.appendChild(calDuration);
+        
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "perma-cancel-btn";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.style.marginLeft = "auto";
+        if (sch.start_time_iso) {
+          const startMs = new Date(sch.start_time_iso).getTime();
+          const remSecs = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
+          if (remSecs <= 20 * 60) {
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = "Locked";
+            cancelBtn.title = "Cannot cancel schedules within 20 minutes of starting.";
+          }
+        }
+        cancelBtn.addEventListener("click", () => cancelSchedule(sch.start_time_iso));
 
         li.appendChild(calDate);
         li.appendChild(calDetails);
+        li.appendChild(cancelBtn);
         els.upcomingSchedulesList.appendChild(li);
       });
     } // P2: end scheduleJSON changed block
+    
+    // Update live countdowns
+    $$(".cal-duration").forEach(el => {
+      const startMs = el.dataset.startMs;
+      if (startMs) {
+        const remSecs = Math.max(0, Math.floor((parseInt(startMs) - Date.now()) / 1000));
+        el.textContent = "⏳ " + formatTime(remSecs);
+        
+        // Disable cancel button if within 20 mins
+        if (remSecs <= 20 * 60) {
+          const btn = el.parentElement.parentElement.querySelector(".perma-cancel-btn");
+          if (btn && !btn.disabled) {
+            btn.disabled = true;
+            btn.textContent = "Locked";
+            btn.title = "Cannot cancel schedules within 20 minutes of starting.";
+          }
+        }
+      }
+    });
   } else {
     els.upcomingSchedulesCard.classList.add("hidden");
     if (_lastScheduleJSON !== "") {
@@ -475,7 +515,8 @@ function setActiveUI(status) {
   } else if (isPrimaryScheduled) {
     // Scheduled state (not yet active)
     const nextSch = schedules[0];
-    const secs = nextSch.starting_in_seconds || 0;
+    const startMs = new Date(nextSch.start_time_iso).getTime();
+    const secs = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
 
     els.timerRing.classList.remove("break");
     els.modeDisplay.textContent = `Mode: ${nextSch.mode}`;
@@ -851,6 +892,15 @@ async function cancelPermaUnblock(domain) {
     refreshPermaBlocklist();
   } else {
     showToast("Error: " + res.message);
+  }
+}
+
+async function cancelSchedule(start_time_iso) {
+  const res = await api("POST", "/api/cancel-schedule", { start_time_iso });
+  if (res.status === "ok") {
+    showToast("Schedule cancelled.");
+  } else {
+    showToast(`Error: ${res.message}`);
   }
 }
 
@@ -1465,7 +1515,18 @@ async function init() {
     eventSource.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        updateUI(data);
+        // SSE delivers full status payloads — apply directly
+        const phaseChanged = data.pomo_phase !== _lastPomoPhase;
+        const activeChanged = data.active !== _lastActiveState;
+        if (phaseChanged || activeChanged) {
+          if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+          }
+        }
+        _lastPomoPhase = data.pomo_phase || null;
+        _lastActiveState = data.active;
+        setActiveUI(data);
       } catch (err) {
         console.error("SSE parse error:", err);
       }

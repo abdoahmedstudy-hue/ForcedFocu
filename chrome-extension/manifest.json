@@ -38,6 +38,7 @@
     {
       "resources": [
         "blocked.html",
+        "blocked.js",
         "icons/*"
       ],
       "matches": [

@@ -29,6 +29,9 @@ let syncInProgress = false; // P4: Guard against cascading syncs
 let blockedDomainsSet = new Set();
 // R1: Current blocking mode — "blacklist", "whitelist", "rescue", or null
 let currentBlockMode = null;
+// Permanent blocklist — always enforced, independent of session
+let permaBlockedSet = new Set();
+let lastPermaHash = ""; // Hash of perma domains to detect changes
 
 // Analytics
 let analytics = {
@@ -55,6 +58,7 @@ async function loadState() {
       "lastPhase",
       "blockedDomains",
       "currentBlockMode",
+      "permaDomains",
     ]);
     lastActive = result.lastActive || false;
     lastMode = result.lastMode || null;
@@ -64,6 +68,9 @@ async function loadState() {
       blockedDomainsSet = new Set(result.blockedDomains);
     }
     currentBlockMode = result.currentBlockMode || null;
+    if (result.permaDomains && Array.isArray(result.permaDomains)) {
+      permaBlockedSet = new Set(result.permaDomains);
+    }
   } catch (e) {
     // storage.session may not be available in older Chrome versions
     console.warn("[ForcedFocus] Could not load session state:", e);
@@ -79,6 +86,7 @@ async function saveState() {
       // R1: Persist blocked domains (capped at 5000 to avoid storage limits)
       blockedDomains: [...blockedDomainsSet].slice(0, 5000),
       currentBlockMode,
+      permaDomains: [...permaBlockedSet].slice(0, 5000),
     });
   } catch (e) {
     // Non-critical — state will just be re-synced on next poll
@@ -184,6 +192,9 @@ function shouldBlockUrl(urlString) {
   const hostname = extractHostname(urlString);
   if (!hostname) return false;
 
+  // Always block permanently blocked domains (session-independent)
+  if (isHostnamePermaBlocked(hostname)) return true;
+
   if (currentBlockMode === "blacklist") {
     // Blacklist: block if domain is in the set
     return isHostnameBlocked(hostname);
@@ -194,6 +205,20 @@ function shouldBlockUrl(urlString) {
     return !isHostnameBlocked(hostname);
   }
 
+  return false;
+}
+
+/**
+ * Check if a hostname is permanently blocked.
+ */
+function isHostnamePermaBlocked(hostname) {
+  if (!hostname || permaBlockedSet.size === 0) return false;
+  if (permaBlockedSet.has(hostname)) return true;
+  const parts = hostname.split(".");
+  for (let i = 1; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join(".");
+    if (permaBlockedSet.has(parent)) return true;
+  }
   return false;
 }
 
@@ -283,9 +308,9 @@ const SUB_RESOURCE_TYPES = [
 // R1: Main frame type — gets "redirect" action to blocked.html
 const MAIN_FRAME_TYPES = ["main_frame"];
 
-function generateBlockRules(domains) {
+function generateBlockRules(domains, startId = RULE_ID_START) {
   const rules = [];
-  let id = RULE_ID_START;
+  let id = startId;
 
   for (const domain of domains) {
     // R1: Main frame navigations → redirect to blocked.html
@@ -319,7 +344,7 @@ function generateBlockRules(domains) {
     });
   }
 
-  return rules;
+  return { rules, nextId: id };
 }
 
 function generateWhitelistRules(allowedDomains) {
@@ -403,16 +428,18 @@ async function clearBlockRules() {
 
 async function applyBlockRules(domains) {
   await clearBlockRules();
-  if (domains.length === 0) {
+  // Merge session domains with permanent blocklist
+  const allDomains = [...new Set([...domains, ...permaBlockedSet])];
+  if (allDomains.length === 0) {
     log("No domains to block.");
     return;
   }
-  const rules = generateBlockRules(domains);
+  const { rules } = generateBlockRules(allDomains);
   await updateDynamicRules(rules);
   // R1: Update in-memory blocked domains set for webNavigation matching
   blockedDomainsSet = new Set(domains.map((d) => d.toLowerCase()));
   currentBlockMode = "blacklist";
-  log(`Applied ${rules.length} block rules for ${domains.length} domains.`);
+  log(`Applied ${rules.length} block rules for ${allDomains.length} domains (${permaBlockedSet.size} permanent).`);
 }
 
 async function applyWhitelistRules(allowedDomains) {
@@ -425,6 +452,43 @@ async function applyWhitelistRules(allowedDomains) {
   log(
     `Applied whitelist rules: ${allowedDomains.length} allowed, rest blocked.`,
   );
+}
+
+// ── Permanent Blocklist Sync ──────────────────────────────────────────────────
+
+async function syncPermaBlocklist() {
+  try {
+    const response = await fetch(`${API}/api/perma-blocklist`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const domains = data.domains || [];
+
+    // Quick hash check to avoid unnecessary rule rebuilds
+    const hash = domains.sort().join(",");
+    if (hash === lastPermaHash) return;
+    lastPermaHash = hash;
+
+    const oldSize = permaBlockedSet.size;
+    permaBlockedSet = new Set(domains.map((d) => d.toLowerCase()));
+    await saveState();
+
+    log(`Permanent blocklist synced: ${permaBlockedSet.size} domains (was ${oldSize}).`);
+
+    // If no session is active, apply/update perma rules directly
+    if (!lastActive) {
+      await clearBlockRules();
+      if (permaBlockedSet.size > 0) {
+        const { rules } = generateBlockRules([...permaBlockedSet]);
+        await updateDynamicRules(rules);
+        log(`Applied ${rules.length} permanent block rules (no active session).`);
+      }
+    }
+    // If a session IS active, the rules will be merged on next applyBlockRules call
+  } catch (e) {
+    // Non-critical — will retry on next sync cycle
+  }
 }
 
 // ── Session Management ────────────────────────────────────────────────────────
@@ -468,6 +532,9 @@ async function syncBlockRules(status = null) {
     if (!status) {
       status = await fetchSessionStatus();
     }
+
+    // Sync permanent blocklist from daemon
+    await syncPermaBlocklist();
 
     // Reset connection attempts on successful fetch
     connectionAttempts = 0;
@@ -547,13 +614,19 @@ async function syncBlockRules(status = null) {
         await saveState();
       }
     } else {
-      // Idle — remove all rules
+      // Idle — remove session rules but keep permanent blocks
       if (lastActive) {
         await clearBlockRules();
         blockedDomainsSet.clear();
         currentBlockMode = null;
         lastActive = false;
         lastMode = null;
+        // Re-apply permanent block rules if any exist
+        if (permaBlockedSet.size > 0) {
+          const { rules } = generateBlockRules([...permaBlockedSet]);
+          await updateDynamicRules(rules);
+          log(`Session ended — re-applied ${rules.length} permanent block rules.`);
+        }
         await saveState();
       }
     }
@@ -562,6 +635,9 @@ async function syncBlockRules(status = null) {
     if (status.active) {
       chrome.action.setBadgeText({ text: "ON" });
       chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+    } else if (permaBlockedSet.size > 0) {
+      chrome.action.setBadgeText({ text: "🔒" });
+      chrome.action.setBadgeBackgroundColor({ color: "#991b1b" });
     } else {
       chrome.action.setBadgeText({ text: "" });
     }

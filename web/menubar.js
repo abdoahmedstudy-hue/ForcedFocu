@@ -197,60 +197,86 @@ function renderStatus(data) {
   if (isStarting) return; // Prevent UI jank while daemon applies kernel rules
 
   const active = data.active;
+  const schedules = data.schedules || [];
+  const hasSchedules = schedules.length > 0;
+  const isPrimaryScheduled = !active && hasSchedules;
   const isIntentVisible = !els.intentState.classList.contains("hidden");
 
-  if (active) {
+  if (active || isPrimaryScheduled) {
     els.idleState.classList.add("hidden");
     els.intentState.classList.add("hidden");
     els.activeState.classList.remove("hidden");
 
-    // Populate Info Grid
-    els.infoMode.textContent =
-      data.session_type === "rescue" ? "RESCUE" : data.mode.toUpperCase();
-    els.infoType.textContent = data.session_type.toUpperCase();
-    els.infoExpires.textContent = data.expires_at || "--:--";
+    if (active) {
+      // Populate Info Grid
+      els.infoMode.textContent =
+        data.session_type === "rescue" ? "RESCUE" : data.mode.toUpperCase();
+      els.infoType.textContent = data.session_type.toUpperCase();
+      els.infoExpires.textContent = data.expires_at || "--:--";
 
-    els.badgeText.textContent =
-      data.session_type === "rescue" ? "RESCUE" : "ACTIVE";
-    els.badge.classList.add("active");
+      els.badgeText.textContent =
+        data.session_type === "rescue" ? "RESCUE" : "ACTIVE";
+      els.badge.classList.add("active");
 
-    if (data.session_type === "pomodoro") {
-      totalSecs = data.pomo_phase_total || 1;
-      startCountdown(data.pomo_phase_remaining || 0);
-      els.label.textContent = data.pomo_phase.toUpperCase();
+      if (data.session_type === "pomodoro") {
+        totalSecs = data.pomo_phase_total || 1;
+        startCountdown(data.pomo_phase_remaining || 0);
+        els.label.textContent = data.pomo_phase.toUpperCase();
 
-      els.nextRow.classList.remove("hidden");
-      els.infoNext.textContent =
-        data.pomo_phase === "focus" ? "BREAK" : "FOCUS";
+        els.nextRow.classList.remove("hidden");
+        els.infoNext.textContent =
+          data.pomo_phase === "focus" ? "BREAK" : "FOCUS";
 
-      if (data.pomo_phase === "break") {
-        $(".timer-ring").classList.add("break");
-      } else {
-        $(".timer-ring").classList.remove("break");
-      }
-    } else {
-      totalSecs = data.total_duration_seconds || data.remaining_seconds;
-      startCountdown(data.remaining_seconds);
-      els.label.textContent = "REMAINING";
-      els.nextRow.classList.add("hidden");
-      $(".timer-ring").classList.remove("break");
-    }
-    
-    const intentContainer = document.getElementById("activeIntentContainer");
-    const intentDisplay = document.getElementById("activeIntentDisplay");
-    
-    if (intentContainer && intentDisplay) {
-      if (data.intent) {
-        intentContainer.classList.remove("hidden");
-        intentDisplay.textContent = data.intent;
-        
-        const intentTasksContainer = document.getElementById("activeIntentTasks");
-        if (intentTasksContainer) {
-          renderIntentTasks(intentTasksContainer, data.intent_tasks || []);
+        if (data.pomo_phase === "break") {
+          $(".timer-ring").classList.add("break");
+        } else {
+          $(".timer-ring").classList.remove("break");
         }
       } else {
-        intentContainer.classList.add("hidden");
+        totalSecs = data.total_duration_seconds || data.remaining_seconds;
+        startCountdown(data.remaining_seconds);
+        els.label.textContent = "REMAINING";
+        els.nextRow.classList.add("hidden");
+        $(".timer-ring").classList.remove("break");
       }
+      
+      const intentContainer = document.getElementById("activeIntentContainer");
+      const intentDisplay = document.getElementById("activeIntentDisplay");
+      
+      if (intentContainer && intentDisplay) {
+        if (data.intent) {
+          intentContainer.classList.remove("hidden");
+          intentDisplay.textContent = data.intent;
+          
+          const intentTasksContainer = document.getElementById("activeIntentTasks");
+          if (intentTasksContainer) {
+            renderIntentTasks(intentTasksContainer, data.intent_tasks || []);
+          }
+        } else {
+          intentContainer.classList.add("hidden");
+        }
+      }
+    } else {
+      // Primary Scheduled
+      const nextSch = schedules[0];
+      const startMs = new Date(nextSch.start_time_iso).getTime();
+      const secs = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
+      
+      els.infoMode.textContent = nextSch.mode.toUpperCase();
+      els.infoType.textContent = "SCHEDULED";
+      els.infoExpires.textContent = nextSch.starts_at;
+      
+      els.badgeText.textContent = "SCHEDULED";
+      els.badge.classList.add("active");
+      
+      totalSecs = 0;
+      startCountdown(secs);
+      els.label.textContent = "STARTING IN";
+      els.nextRow.classList.add("hidden");
+      $(".timer-ring").classList.remove("break");
+      
+      const intentContainer = document.getElementById("activeIntentContainer");
+      if (intentContainer) intentContainer.classList.add("hidden");
     }
   } else {
     // We are idle
@@ -657,7 +683,7 @@ function connectSSE() {
   eventSource.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
-      updateUI(data);
+      renderStatus(data);
       if (window.webkit && window.webkit.messageHandlers.nativeCallback) {
         window.webkit.messageHandlers.nativeCallback.postMessage({ action: "syncState", data: data });
       }
