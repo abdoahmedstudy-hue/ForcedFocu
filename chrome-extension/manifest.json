@@ -39,7 +39,8 @@
       "resources": [
         "blocked.html",
         "blocked.js",
-        "icons/*"
+        "icons/*",
+        "shared/*"
       ],
       "matches": [
         "<all_urls>"

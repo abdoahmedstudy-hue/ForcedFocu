@@ -121,6 +121,10 @@ chown root:wheel "$WEB_DST"
 
 mkdir -p "$WEB_DIR_DST"
 cp -R "$WEB_DIR_SRC/"* "$WEB_DIR_DST/"
+# Ensure shared directory is included if it hasn't been synced locally yet
+if [[ -d "${SCRIPT_DIR}/shared" ]]; then
+    cp -R "${SCRIPT_DIR}/shared" "$WEB_DIR_DST/"
+fi
 chmod -R 755 "$WEB_DIR_DST"
 
 cp "$PLIST_SRC" "$PLIST_DST"

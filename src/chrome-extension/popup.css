@@ -1,6 +1,25 @@
 /* ForcedFocus Chrome Extension — Popup Styles */
 
-@import "./shared/tokens.css";
+:root {
+  --bg-primary: #0b0b14;
+  --bg-secondary: #12121f;
+  --bg-card: rgba(18, 18, 35, 0.9);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-active: rgba(99, 102, 241, 0.4);
+  --text-primary: #e4e4f0;
+  --text-secondary: #8585a5;
+  --text-muted: #4a4a65;
+  --accent-blue: #6366f1;
+  --accent-violet: #8b5cf6;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
+  --radius: 28px;
+  --radius-sm: 24px;
+  --radius-xs: 16px;
+  --transition: 0.2s ease;
+}
 
 * {
   margin: 0;

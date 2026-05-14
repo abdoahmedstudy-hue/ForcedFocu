@@ -753,6 +753,8 @@ function connectSSE() {
     try {
       const data = JSON.parse(e.data);
       syncBlockRules(data);
+      // Broadcast to popup so it can refresh its UI immediately
+      chrome.runtime.sendMessage({ action: "stateUpdated", state: data }).catch(() => {});
     } catch (err) {
       log(`SSE Parse Error: ${err.message}`, "error");
     }

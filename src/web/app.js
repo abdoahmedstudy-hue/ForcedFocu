@@ -3,9 +3,6 @@
  * Handles countdown timer, API calls, domain management, and UI state.
  */
 
-import { escapeHtml, formatTime, extractDomain } from "./shared/utils.js";
-import { renderIntentTasks } from "./shared/intent-tasks.js";
-
 const API = "";
 let currentMode = "blacklist";
 let selectedDuration = 120;
@@ -28,7 +25,20 @@ let sessionSnapshot = { intent: "", tasks: [] };
 
 // ── HTML Sanitization ────────────────────────────────────────────────────────
 
-
+// P6: Static character map instead of throwaway DOM elements
+function escapeHtml(str) {
+  return String(str).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[c],
+  );
+}
 
 // Audio Manager
 const AudioManager = {
@@ -173,7 +183,12 @@ function showToast(msg, duration = 3000) {
 
 // ── Timer ────────────────────────────────────────────────────────────────────
 
-
+function formatTime(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 function updateTimerDisplay(remMs, isInitial = false) {
   const remSecs = Math.max(0, Math.ceil(remMs / 1000));
@@ -444,7 +459,7 @@ function setActiveUI(status) {
           intentDisplay.textContent = status.intent;
         }
         if (intentTasksContainer) {
-          renderIntentTasks(intentTasksContainer, status.intent_tasks || [], api, status.intent);
+          renderIntentTasks(intentTasksContainer, status.intent_tasks || []);
         }
       } else {
         intentContainer.style.display = "none";
@@ -891,7 +906,75 @@ async function cancelSchedule(start_time_iso) {
 
 // ── Intent Tasks ─────────────────────────────────────────────────────────────
 
-
+function renderIntentTasks(container, tasks) {
+  if (!tasks || tasks.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  
+  const ul = document.createElement("ul");
+  ul.dir = "auto";
+  ul.style.listStyle = "none";
+  ul.style.padding = "0";
+  ul.style.margin = "0";
+  ul.style.display = "flex";
+  ul.style.flexDirection = "column";
+  ul.style.gap = "8px";
+  ul.style.width = "100%";
+  
+  tasks.forEach((task, index) => {
+    const li = document.createElement("li");
+    li.dir = "auto";
+    li.className = "intent-task-item";
+    li.style.display = "flex";
+    li.style.alignItems = "flex-start";
+    li.style.gap = "10px";
+    li.style.margin = "2px 0";
+    li.style.width = "100%";
+    li.style.boxSizing = "border-box";
+    
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "custom-checkbox";
+    checkbox.checked = task.completed;
+    
+    checkbox.addEventListener("change", async (e) => {
+      task.completed = e.target.checked;
+      label.style.textDecoration = task.completed ? "line-through" : "none";
+      label.style.opacity = task.completed ? "0.5" : "1";
+      
+      try {
+        await api("POST", "/api/intent", { 
+          intent: document.getElementById("activeIntentDisplay").textContent, 
+          intent_tasks: tasks 
+        });
+      } catch (err) {
+        console.error("Failed to update task status", err);
+      }
+    });
+    
+    const label = document.createElement("label");
+    label.dir = "auto";
+    label.textContent = task.text;
+    label.style.cursor = "pointer";
+    label.style.flex = "1";
+    label.style.lineHeight = "1.4";
+    label.style.textDecoration = task.completed ? "line-through" : "none";
+    label.style.opacity = task.completed ? "0.5" : "1";
+    
+    label.addEventListener("click", (e) => {
+      e.preventDefault();
+      checkbox.click();
+    });
+    
+    li.appendChild(checkbox);
+    li.appendChild(label);
+    ul.appendChild(li);
+  });
+  
+  container.innerHTML = "";
+  container.appendChild(ul);
+}
 
 function showRecap(data) {
   const modal = document.getElementById("recapModal");
@@ -1302,7 +1385,18 @@ function initEvents() {
   });
 }
 
-
+function extractDomain(input) {
+  let d = input.trim().toLowerCase();
+  // Strip protocol
+  d = d.replace(/^https?:\/\//, "");
+  // Strip path, query, hash
+  d = d.split("/")[0].split("?")[0].split("#")[0];
+  // Strip port
+  d = d.split(":")[0];
+  // Strip wildcard characters (e.g., *.example.com → example.com, example.com* → example.com)
+  d = d.replace(/^\*\.?/, "").replace(/\*$/, "");
+  return d;
+}
 
 async function addDomain(listName) {
   const input =

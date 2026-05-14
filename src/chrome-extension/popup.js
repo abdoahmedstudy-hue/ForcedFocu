@@ -3,9 +3,6 @@
  * Controls session start/stop, displays timer, and manages UI state.
  */
 
-import { formatTime } from "./shared/utils.js";
-import { renderIntentTasks } from "./shared/intent-tasks.js";
-
 const API = "http://127.0.0.1:7070";
 let mode = "blacklist";
 let duration = 120;
@@ -105,7 +102,12 @@ async function checkServer() {
 
 // ── Timer (P1: wall-clock anchor + R4: no negative values) ──────────────────
 
-
+function fmt(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 function updateRing(remaining) {
   const circ = 2 * Math.PI * 52; // 326.73
@@ -128,7 +130,7 @@ function startCountdown(secs) {
   const timerValue = $("#timerValue");
   const timerLabel = $("#timerLabel");
 
-  if (timerValue) timerValue.textContent = formatTime(currentRemaining);
+  if (timerValue) timerValue.textContent = fmt(currentRemaining);
   if (timerLabel) timerLabel.textContent = "REMAINING";
   updateRing(currentRemaining);
 
@@ -136,7 +138,7 @@ function startCountdown(secs) {
     const elapsed = (performance.now() - anchor) / 1000;
     currentRemaining = Math.max(0, Math.round(anchorSecs - elapsed));
 
-    if (timerValue) timerValue.textContent = formatTime(currentRemaining);
+    if (timerValue) timerValue.textContent = fmt(currentRemaining);
     updateRing(currentRemaining);
 
     if (currentRemaining <= 0) {
@@ -247,7 +249,7 @@ function renderStatus(data) {
         }
         const intentTasksContainer = $("#activeIntentTasks");
         if (intentTasksContainer) {
-          renderIntentTasks(intentTasksContainer, data.intent_tasks || [], api, data.intent);
+          renderIntentTasks(intentTasksContainer, data.intent_tasks || []);
         }
       } else {
         intentContainer.style.display = "none";
@@ -359,17 +361,81 @@ function renderStatus(data) {
 
 // ── Intent Tasks ─────────────────────────────────────────────────────────────
 
-
-
-async function refresh(stateData) {
-  try {
-    if (stateData) {
-      renderStatus(stateData);
-    } else {
-      const data = await api("GET", "/api/status");
-      if (data.status === "ok") {
-        renderStatus(data);
+function renderIntentTasks(container, tasks) {
+  if (!tasks || tasks.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  
+  const ul = document.createElement("ul");
+  ul.dir = "auto";
+  ul.style.listStyle = "none";
+  ul.style.padding = "0";
+  ul.style.margin = "0";
+  ul.style.display = "flex";
+  ul.style.flexDirection = "column";
+  ul.style.gap = "8px";
+  ul.style.width = "100%";
+  
+  tasks.forEach((task, index) => {
+    const li = document.createElement("li");
+    li.dir = "auto";
+    li.className = "intent-task-item";
+    li.style.display = "flex";
+    li.style.alignItems = "flex-start";
+    li.style.gap = "8px";
+    li.style.margin = "1px 0";
+    li.style.width = "100%";
+    li.style.boxSizing = "border-box";
+    
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "custom-checkbox";
+    checkbox.checked = task.completed;
+    
+    checkbox.addEventListener("change", async (e) => {
+      task.completed = e.target.checked;
+      label.style.textDecoration = task.completed ? "line-through" : "none";
+      label.style.opacity = task.completed ? "0.5" : "1";
+      
+      try {
+        await api("POST", "/api/intent", { 
+          intent: $("#activeIntentDisplay").textContent, 
+          intent_tasks: tasks 
+        });
+      } catch (err) {
+        console.error("Failed to update task status", err);
       }
+    });
+    
+    const label = document.createElement("label");
+    label.dir = "auto";
+    label.textContent = task.text;
+    label.style.cursor = "pointer";
+    label.style.flex = "1";
+    label.style.lineHeight = "1.4";
+    label.style.textDecoration = task.completed ? "line-through" : "none";
+    label.style.opacity = task.completed ? "0.5" : "1";
+    
+    label.addEventListener("click", (e) => {
+      e.preventDefault();
+      checkbox.click();
+    });
+    
+    li.appendChild(checkbox);
+    li.appendChild(label);
+    ul.appendChild(li);
+  });
+  
+  container.innerHTML = "";
+  container.appendChild(ul);
+}
+
+async function refresh() {
+  try {
+    const data = await api("GET", "/api/status");
+    if (data.status === "ok") {
+      renderStatus(data);
     }
   } catch (error) {
     console.error("Failed to refresh status:", error);
@@ -712,15 +778,19 @@ async function init() {
   initEvents();
 
 
-  // Listen for state updates from the background worker's SSE connection
+  // S3: Listen for phase change broadcasts from background worker
+  // Triggers immediate UI refresh when Pomodoro transitions focus↔break
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === "stateUpdated" || msg.action === "phaseChanged") {
-      refresh(msg.state); // If msg.state is provided, refresh can use it or just fetch
+    if (msg.action === "phaseChanged") {
+      refresh();
     }
   });
 
-  // Fetch status FIRST, then render — eliminates 00:00 flash on popup open
+  // S1: Fetch status FIRST, then render — eliminates 00:00 flash on popup open
   await refresh();
+
+  // Poll every 2s
+  setInterval(refresh, 2000);
 }
 
 document.addEventListener("DOMContentLoaded", init);

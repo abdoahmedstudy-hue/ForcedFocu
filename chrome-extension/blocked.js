@@ -3,6 +3,7 @@
 // Supports both session-based blocks and permanent blocks.
 
 const API = "http://127.0.0.1:7070";
+import { formatTime } from "./shared/utils.js";
 
 // ── Domain Display ───────────────────────────────────────────────────────────
 const params = new URLSearchParams(window.location.search);
@@ -151,15 +152,7 @@ function startTick() {
 
 // ── Display Functions ────────────────────────────────────────────────────────
 
-function formatTime(remSecs) {
-  const h = Math.floor(remSecs / 3600);
-  const m = Math.floor((remSecs % 3600) / 60);
-  const s = remSecs % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
+
 
 function updateSessionDisplay(remSecs) {
   if (!badge) return;

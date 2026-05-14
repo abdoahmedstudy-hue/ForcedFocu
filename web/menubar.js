@@ -2,6 +2,7 @@ const API = "http://127.0.0.1:7070";
 let currentMode = "blacklist";
 let currentType = "standard";
 let totalSecs = 0;
+let currentRemaining = 0;
 let countdownInterval = null;
 let apiToken = "";
 let selectedGroups = [];
@@ -160,8 +161,10 @@ function updateRing(remMs, isInitial = false) {
 }
 
 function startCountdown(rem) {
+  if (countdownInterval && Math.abs(currentRemaining - rem) <= 2) return;
   if (countdownInterval) clearInterval(countdownInterval);
 
+  currentRemaining = rem;
   const startTime = Date.now();
   const durationMs = rem * 1000;
   const endTime = startTime + durationMs;
@@ -173,6 +176,7 @@ function startCountdown(rem) {
 
     if (remMs <= 0) {
       clearInterval(countdownInterval);
+      countdownInterval = null;
       els.time.textContent = fmt(0);
       updateRing(0);
       refresh();
@@ -180,6 +184,7 @@ function startCountdown(rem) {
     }
 
     const remSecs = Math.ceil(remMs / 1000);
+    currentRemaining = remSecs; // Update global state for drift guard comparison
     els.time.textContent = fmt(remSecs);
     if (els.infoNextTime) els.infoNextTime.textContent = fmtClock(remSecs);
 
@@ -188,7 +193,7 @@ function startCountdown(rem) {
   };
 
   tick();
-  countdownInterval = setInterval(tick, 100); // 10fps for buttery smooth movement
+  countdownInterval = setInterval(tick, 16); // 60fps for buttery smooth movement
 }
 
 let isStarting = false;
@@ -287,7 +292,10 @@ function renderStatus(data) {
     }
     els.badgeText.textContent = "Idle";
     els.badge.classList.remove("active");
-    if (countdownInterval) clearInterval(countdownInterval);
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
   }
 }
 
@@ -647,6 +655,7 @@ window.onPopoverShow = () => {
   fetchGroups();
   refresh();
   connectSSE();
+  if (!globalPollInterval) globalPollInterval = setInterval(refresh, 1000);
 };
 
 async function loadSettings() {
@@ -663,6 +672,10 @@ async function loadSettings() {
 window.onPopoverHide = () => {
   // Keep SSE active to drive the native menubar countdown via nativeCallback
   if (countdownInterval) clearInterval(countdownInterval);
+  if (globalPollInterval) {
+    clearInterval(globalPollInterval);
+    globalPollInterval = null;
+  }
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -673,6 +686,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   fetchGroups();
   refresh();
   connectSSE();
+  if (!globalPollInterval) globalPollInterval = setInterval(refresh, 1000);
 });
 
 let eventSource = null;
