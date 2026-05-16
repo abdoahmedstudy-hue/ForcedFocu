@@ -671,7 +671,10 @@ async function loadSettings() {
 
 window.onPopoverHide = () => {
   // Keep SSE active to drive the native menubar countdown via nativeCallback
-  if (countdownInterval) clearInterval(countdownInterval);
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
   if (globalPollInterval) {
     clearInterval(globalPollInterval);
     globalPollInterval = null;
@@ -691,6 +694,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 let eventSource = null;
 function connectSSE() {
+  if (eventSource && (eventSource.readyState === 0 || eventSource.readyState === 1)) return;
   if (eventSource) eventSource.close();
   eventSource = new EventSource(API + "/api/stream");
   
