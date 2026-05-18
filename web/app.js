@@ -25,6 +25,7 @@ let selectedGroups = new Set();
 let apiToken = ""; // Per-launch API token for mutation auth
 let lastActiveState = false;
 let sessionSnapshot = { intent: "", tasks: [] };
+let _cachedRecurring = []; // Optimistic local cache for instant UI updates
 
 // ── HTML Sanitization ────────────────────────────────────────────────────────
 
@@ -98,6 +99,12 @@ const els = {
   upcomingSchedulesCard: $("#upcomingSchedulesCard"),
   upcomingSchedulesList: $("#upcomingSchedulesList"),
   upcomingSchedulesCount: $("#upcomingSchedulesCount"),
+  recurringSchedulesCard: $("#recurringSchedulesCard"),
+  recurringSchedulesList: $("#recurringSchedulesList"),
+  recurringSchedulesCount: $("#recurringSchedulesCount"),
+  recurringDays: $("#recurringDays"),
+  recurringTime: $("#recurringTime"),
+  btnAddRecurring: $("#btnAddRecurring"),
   rescueCard: $("#rescueCard"),
   rescueDuration: $("#rescueDuration"),
   btnRescue: $("#btnRescue"),
@@ -431,6 +438,10 @@ function setActiveUI(status) {
     }
   }
 
+  // Update Recurring Schedules List
+  _cachedRecurring = status.recurring_schedules || [];
+  renderRecurringList(_cachedRecurring);
+
   // ── 4. Main Timer Logic ──
   if (isFullyActive) {
     const intentContainer = document.getElementById("activeIntentContainer");
@@ -539,6 +550,77 @@ function setActiveUI(status) {
     stopCountdown();
     els.timerValue.textContent = "00:00:00";
   }
+}
+
+// ── Render Recurring Schedules List (standalone for optimistic updates) ───────
+
+function renderRecurringList(recurring) {
+  if (!els.recurringSchedulesCount) return;
+  els.recurringSchedulesCount.textContent = recurring.length;
+  els.recurringSchedulesList.innerHTML = "";
+
+  if (recurring.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty-list";
+    li.textContent = "No recurring rules configured";
+    els.recurringSchedulesList.appendChild(li);
+    return;
+  }
+
+  // Display order: Sat(5), Sun(6), Mon(0), Tue(1), Wed(2), Thu(3), Fri(4)
+  const dayOrder = [5, 6, 0, 1, 2, 3, 4];
+  const daysArr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  recurring.forEach((sch) => {
+    const li = document.createElement("li");
+    li.className = "recurring-item";
+
+    const calDate = document.createElement("div");
+    calDate.className = "cal-date";
+    const calMonth = document.createElement("span");
+    calMonth.className = "cal-month";
+    calMonth.textContent = "🔁";
+    calMonth.style.fontSize = "18px";
+    calDate.appendChild(calMonth);
+
+    const calDetails = document.createElement("div");
+    calDetails.className = "cal-details";
+
+    const calTime = document.createElement("div");
+    calTime.className = "cal-time";
+    calTime.textContent = String(sch.start_time || "");
+
+    const calTitle = document.createElement("div");
+    calTitle.className = "cal-title";
+    // Sort days by Sat→Fri order for display
+    const sortedDays = (sch.days_of_week || []).slice().sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+    const daysStr = sortedDays.map(d => daysArr[d]).join(", ");
+    calTitle.textContent = daysStr;
+
+    const calMeta = document.createElement("div");
+    calMeta.className = "cal-duration";
+    const modeLabel = (sch.mode === "whitelist") ? "🛡️ Whitelist" : "🚫 Blacklist";
+    const typeLabel = (sch.session_type === "pomodoro") ? " · 🍅 Pomodoro" : "";
+    calMeta.textContent = `⏳ ${sch.duration_minutes || 0}m · ${modeLabel}${typeLabel}`;
+
+    calDetails.appendChild(calTime);
+    calDetails.appendChild(calTitle);
+    calDetails.appendChild(calMeta);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "recurring-remove";
+    cancelBtn.innerHTML = "×";
+    cancelBtn.title = "Remove";
+    cancelBtn.addEventListener("click", () => {
+      if (window.removeRecurringSchedule) window.removeRecurringSchedule(sch.id);
+    });
+
+    li.appendChild(calDate);
+    li.appendChild(calDetails);
+    li.appendChild(cancelBtn);
+
+    els.recurringSchedulesList.appendChild(li);
+  });
 }
 
 // ── Refresh Status ───────────────────────────────────────────────────────────
@@ -1185,6 +1267,106 @@ function initEvents() {
       refreshStatus();
     });
   }
+
+  // Recurring Schedules Setup
+  let selectedRecurringDays = [];
+  
+  if (els.recurringDays) {
+    els.recurringDays.querySelectorAll('.day-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active');
+        const day = parseInt(btn.dataset.day, 10);
+        if (selectedRecurringDays.includes(day)) {
+          selectedRecurringDays = selectedRecurringDays.filter(d => d !== day);
+        } else {
+          selectedRecurringDays.push(day);
+        }
+      });
+    });
+  }
+
+  if (els.btnAddRecurring) {
+    els.btnAddRecurring.addEventListener('click', async () => {
+      if (selectedRecurringDays.length === 0) {
+        showToast("Please select at least one day.");
+        return;
+      }
+      const time = els.recurringTime.value;
+      if (!time) {
+        showToast("Please select a time.");
+        return;
+      }
+
+      // Derive duration from the current session settings
+      let duration;
+      if (sessionType === "pomodoro") {
+        duration = (pomoFocusMin + pomoBreakMin) * pomoCycles;
+      } else {
+        duration = selectedDuration;
+      }
+
+      const payload = {
+        days_of_week: selectedRecurringDays,
+        start_time: time,
+        duration_minutes: duration,
+        mode: currentMode,
+        session_type: sessionType,
+        groups: Array.from(selectedGroups),
+      };
+
+      // Include pomodoro params if applicable
+      if (sessionType === "pomodoro") {
+        payload.focus_minutes = pomoFocusMin;
+        payload.break_minutes = pomoBreakMin;
+        payload.cycles = pomoCycles;
+      }
+
+      const originalBtnHTML = els.btnAddRecurring.innerHTML;
+      els.btnAddRecurring.innerHTML = '<span class="btn-spinner"></span> Adding...';
+      els.btnAddRecurring.disabled = true;
+
+      try {
+        const res = await api("POST", "/api/schedules/recurring", payload);
+        if (res.status === "ok") {
+          showToast("Recurring schedule added successfully.");
+          // Optimistic: immediately render the new rule
+          if (res.rule) {
+            _cachedRecurring.push(res.rule);
+            renderRecurringList(_cachedRecurring);
+          }
+          selectedRecurringDays = [];
+          els.recurringDays.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+          els.recurringTime.value = "";
+        } else {
+          showToast(`Error: ${res.message || "Failed to add"}`);
+        }
+      } catch (err) {
+        showToast("Connection failed.");
+      } finally {
+        els.btnAddRecurring.innerHTML = originalBtnHTML;
+        els.btnAddRecurring.disabled = false;
+      }
+    });
+  }
+
+  window.removeRecurringSchedule = async function(id) {
+    // Optimistic: immediately remove from DOM
+    _cachedRecurring = _cachedRecurring.filter(r => r.id !== id);
+    renderRecurringList(_cachedRecurring);
+    try {
+      const res = await api("DELETE", `/api/schedules/recurring/${id}`);
+      if (res.status === "ok") {
+        showToast("Recurring schedule removed.");
+      } else {
+        showToast(`Error: ${res.message || "Failed to remove"}`);
+        // Reconcile on failure
+        refreshStatus();
+      }
+    } catch (err) {
+      showToast("Connection failed.");
+      refreshStatus();
+    }
+  };
 
   // Rescue button
   els.btnRescue.addEventListener("click", async () => {

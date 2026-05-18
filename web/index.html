@@ -446,6 +446,38 @@
                 <!-- Populated by JS -->
               </ul>
             </div>
+
+            <!-- Recurring Schedules -->
+            <div class="card" id="recurringSchedulesCard">
+              <div class="list-header" style="margin-bottom: 12px">
+                <h2 class="card-title" style="margin-bottom: 0">
+                  🔁 Recurring Schedules
+                </h2>
+                <span class="list-count" id="recurringSchedulesCount">0</span>
+              </div>
+              <ul class="recurring-list" id="recurringSchedulesList">
+                <!-- Populated by JS -->
+              </ul>
+              
+              <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+                <h3 style="font-size: 14px; margin-bottom: 4px; color: var(--text-secondary);">Add New Recurring Rule</h3>
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">Uses current mode, duration &amp; group settings from above.</p>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;" id="recurringDays">
+                  <button class="day-btn" data-day="5">Sat</button>
+                  <button class="day-btn" data-day="6">Sun</button>
+                  <button class="day-btn" data-day="0">Mon</button>
+                  <button class="day-btn" data-day="1">Tue</button>
+                  <button class="day-btn" data-day="2">Wed</button>
+                  <button class="day-btn" data-day="3">Thu</button>
+                  <button class="day-btn" data-day="4">Fri</button>
+                </div>
+                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                  <label for="recurringTime" class="sr-only">Time</label>
+                  <input type="time" id="recurringTime" class="recurring-input" style="flex: 1;">
+                </div>
+                <button class="btn btn-pill btn-add" id="btnAddRecurring" style="width: 100%;">+ Add Rule</button>
+              </div>
+            </div>
           </section>
         </div>
       </div>

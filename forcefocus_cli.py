@@ -220,6 +220,74 @@ def cmd_start(args):
     out.print_data(resp, title="Start Session")
 
 
+def cmd_schedule(args):
+    """Manage schedules (recurring)."""
+    action = args.action
+    if action == "list":
+        resp = send_command({"action": "status"})
+        if out.is_agent:
+            out.print_data(resp)
+            return
+            
+        recurring = resp.get("recurring_schedules", [])
+        if not recurring:
+            console.print("[dim]No recurring schedules defined.[/dim]")
+            return
+            
+        table = Table(title="Recurring Schedules", header_style="bold magenta")
+        table.add_column("ID", style="dim")
+        table.add_column("Days", style="info")
+        table.add_column("Time", justify="right")
+        table.add_column("Duration")
+        
+        days_arr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        for sch in recurring:
+            days_str = ", ".join([days_arr[d] for d in sch.get("days_of_week", [])])
+            table.add_row(
+                sch.get("id", "")[:8],
+                days_str,
+                str(sch.get("start_time", "")),
+                f"{sch.get('duration_minutes', 0)}m"
+            )
+        console.print(table)
+        
+    elif action == "add":
+        if not args.recurring:
+            out.print_error("Only --recurring is supported via schedule add currently. Use 'start --in' for one-off.", code="USAGE_ERROR")
+            
+        days = args.days
+        time_str = args.time
+        dur = args.duration
+        mode = args.mode
+        
+        if not days or not time_str:
+            out.print_error("Must provide --days and --time", code="USAGE_ERROR")
+            
+        try:
+            days_list = [int(d) for d in days.split(",")]
+        except:
+            out.print_error("Invalid days format. Use comma-separated ints 0-6", code="USAGE_ERROR")
+            return
+            
+        payload = {
+            "action": "add_recurring_schedule",
+            "days_of_week": days_list,
+            "start_time": time_str,
+            "duration_minutes": dur,
+            "mode": mode,
+            "session_type": "standard"
+        }
+        
+        resp = send_command(payload)
+        out.print_data(resp, title="Add Recurring Schedule")
+        
+    elif action == "remove":
+        sid = args.id
+        if not sid:
+            out.print_error("ID is required", code="USAGE_ERROR")
+        resp = send_command({"action": "remove_recurring_schedule", "id": sid})
+        out.print_data(resp, title="Remove Recurring Schedule")
+
 def cmd_groups(args):
     """Manage domain groups."""
     action = args.action
@@ -726,6 +794,27 @@ def build_parser():
     p_groups.add_argument("name", nargs="?", help="Group name")
     p_groups.add_argument("domains", nargs="*", help="Domains for 'add'")
     p_groups.set_defaults(func=cmd_groups)
+
+    # schedule
+    p_schedule = sub.add_parser("schedule", help="Manage schedules")
+    p_schedule.add_argument("--human", "-H", action="store_true", help="Force human-friendly output")
+    p_schedule.add_argument("--agent", "-A", action="store_true", help="Force agent-friendly output")
+    
+    sub_sched = p_schedule.add_subparsers(dest="action", help="Schedule action")
+    
+    p_sched_list = sub_sched.add_parser("list", help="List schedules")
+    
+    p_sched_add = sub_sched.add_parser("add", help="Add schedule")
+    p_sched_add.add_argument("--recurring", action="store_true", help="Create recurring schedule")
+    p_sched_add.add_argument("--days", help="Comma separated days (0=Mon, 6=Sun)")
+    p_sched_add.add_argument("--time", help="Start time HH:MM")
+    p_sched_add.add_argument("--duration", type=int, default=120, help="Duration in minutes")
+    p_sched_add.add_argument("--mode", default="blacklist", help="Mode")
+    
+    p_sched_rm = sub_sched.add_parser("remove", help="Remove schedule")
+    p_sched_rm.add_argument("id", help="Schedule ID")
+    
+    p_schedule.set_defaults(func=cmd_schedule)
 
     # perma-block
     p_perma = sub.add_parser(

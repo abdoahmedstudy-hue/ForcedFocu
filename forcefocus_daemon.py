@@ -561,8 +561,10 @@ class ForcedFocusDaemon:
         self._mono_unlock_end: float = 0.0
         self._mono_pomo_phase_end: float = 0.0
         self._mono_last_intent_notif: float = 0.0
+        self._mono_last_recurring_check: float = 0.0
         self._reenforce_flag = False  # Set by signal handler, handled by watchdog
         self.schedules: list = []
+        self.recurring_schedules: list = []
         self.settings = self._load_settings()
         # Permanent blocklist state (independent from session blacklist)
         self.perma_blocklist: list[str] = []
@@ -1207,6 +1209,10 @@ class ForcedFocusDaemon:
                 logging.error("Failed to restore scheduled sessions: %s", exc)
                 self.schedules = []
 
+        if data.get("recurring_schedules"):
+            self.recurring_schedules = data["recurring_schedules"]
+            logging.info("Restored %d recurring schedules.", len(self.recurring_schedules))
+
         # If no active session data, we're done (schedule-only lockfile)
         if not data.get("expiry"):
             if self.schedules:
@@ -1427,16 +1433,57 @@ class ForcedFocusDaemon:
             # Check overlap if active
             if self.active:
                 if not is_scheduling:
-                    rem = (self.session_expiry - datetime.now()).total_seconds()
+                    if self.session_type != cmd.get("session_type", "standard"):
+                        return {"status": "error", "message": "Cannot merge different session types (e.g. standard and pomodoro)."}
+                    if self.mode != mode:
+                        return {"status": "error", "message": "Cannot merge different modes (whitelist/blacklist)."}
+
+                    new_expiry = datetime.now() + timedelta(minutes=duration_minutes)
+                    added_minutes = 0
+                    if new_expiry > self.session_expiry:
+                        added_minutes = int((new_expiry - self.session_expiry).total_seconds() / 60)
+                        self.session_expiry = new_expiry
+                        self._mono_session_end = get_continuous_time() + (duration_minutes * 60)
+                        self.total_duration_seconds = max(self.total_duration_seconds, duration_minutes * 60)
+
+                    # Merge groups
+                    selected_groups = cmd.get("groups", [])
+                    if selected_groups:
+                        groups = self._load_groups()
+                        new_domains = []
+                        for gname in selected_groups:
+                            if gname in groups:
+                                new_domains.extend(groups[gname])
+                        
+                        if self.mode == "blacklist":
+                            self.session_base_domains.extend(new_domains)
+                            self.session_base_domains = list(set(d.strip().lower() for d in self.session_base_domains if d.strip() and "." in d))
+                            
+                            new_expanded = self._get_blacklist_domains(selected_groups)
+                            self.active_domains.extend(new_expanded)
+                            self.active_domains = list(set(self.active_domains))
+                            self.active_domains_set = set(self.active_domains)
+                            self._enforce_block()
+                        # For whitelist, adding domains makes it less restrictive. 
+                        # We skip expanding the whitelist during a merge to enforce strictness.
+
+                    self._persist_session_lock()
+                    self.state_changed.set()
+                    
+                    msg = f"Session merged. Extended by {added_minutes} minutes." if added_minutes > 0 else "Session merged. Constraints updated."
+                    logging.info(msg)
                     return {
-                        "status": "already_active",
-                        "message": f"Session active. {int(rem/60)}m {int(rem%60)}s remaining.",
+                        "status": "ok",
+                        "message": msg,
+                        "mode": self.mode,
+                        "domains_count": len(self.active_domains),
+                        "expires_at": self.session_expiry.strftime("%H:%M:%S"),
+                        "event": "merged",
+                        "added_minutes": added_minutes
                     }
-                if start_time < self.session_expiry:
-                    return {
-                        "status": "error",
-                        "message": f"Schedule overlaps with active session (ends at {self.session_expiry.strftime('%H:%M')}).",
-                    }
+                else:
+                    # Allow scheduling even if it overlaps. It will be merged when it executes.
+                    pass
 
             if is_scheduling:
                 end_time = start_time + timedelta(minutes=duration_minutes)
@@ -1545,6 +1592,7 @@ class ForcedFocusDaemon:
                     }
                     for sch in self.schedules
                 ],
+                "recurring_schedules": self.recurring_schedules,
             }
             self.remaining_seconds = duration_minutes * 60
             self.pending_unlock_seconds = 0
@@ -1735,6 +1783,57 @@ class ForcedFocusDaemon:
                 
             return {"status": "error", "message": "Must provide index or start_time_iso to cancel."}
 
+    def _cmd_get_recurring_schedules(self) -> dict:
+        with self.lock:
+            return {"status": "ok", "recurring_schedules": self.recurring_schedules}
+
+    def _cmd_add_recurring_schedule(self, cmd: dict) -> dict:
+        import uuid
+        with self.lock:
+            days = cmd.get("days_of_week", [])
+            start_time = cmd.get("start_time", "")
+            duration = cmd.get("duration_minutes", 120)
+            mode = cmd.get("mode", "blacklist")
+            groups = cmd.get("groups", [])
+            session_type = cmd.get("session_type", "standard")
+
+            if not days or not start_time:
+                return {"status": "error", "message": "days_of_week and start_time are required."}
+
+            new_rule = {
+                "id": str(uuid.uuid4()),
+                "days_of_week": days,
+                "start_time": start_time,
+                "duration_minutes": duration,
+                "mode": mode,
+                "groups": groups,
+                "session_type": session_type,
+                "last_triggered": ""
+            }
+            # Persist pomodoro params if applicable
+            if session_type == "pomodoro":
+                new_rule["focus_minutes"] = cmd.get("focus_minutes", 25)
+                new_rule["break_minutes"] = cmd.get("break_minutes", 5)
+                new_rule["cycles"] = cmd.get("cycles", 4)
+            self.recurring_schedules.append(new_rule)
+            self._persist_session_lock()
+            self.state_changed.set()
+            return {"status": "ok", "message": "Recurring schedule added.", "rule": new_rule}
+
+    def _cmd_remove_recurring_schedule(self, cmd: dict) -> dict:
+        with self.lock:
+            rule_id = cmd.get("id")
+            if not rule_id:
+                return {"status": "error", "message": "Rule ID is required."}
+            
+            initial_len = len(self.recurring_schedules)
+            self.recurring_schedules = [r for r in self.recurring_schedules if r["id"] != rule_id]
+            if len(self.recurring_schedules) < initial_len:
+                self._persist_session_lock()
+                self.state_changed.set()
+                return {"status": "ok", "message": "Recurring schedule removed."}
+            return {"status": "error", "message": "Recurring schedule not found."}
+
     def _get_status(self) -> dict:
         with self.lock:
             schedules_res = []
@@ -1757,6 +1856,7 @@ class ForcedFocusDaemon:
                     "mode": None,
                     "message": "Idle.",
                     "schedules": schedules_res,
+                    "recurring_schedules": self.recurring_schedules,
                 }
 
             # C3: Use monotonic time for all remaining-seconds fields
@@ -1781,6 +1881,7 @@ class ForcedFocusDaemon:
                     "mode": None,
                     "message": "Session expired.",
                     "schedules": schedules_res,
+                    "recurring_schedules": self.recurring_schedules,
                 }
             result = {
                 "status": "ok",
@@ -2360,7 +2461,7 @@ class ForcedFocusDaemon:
 
         self.active = False
 
-        if getattr(self, "schedules", []):
+        if getattr(self, "schedules", []) or self.recurring_schedules:
             self._persist_session_lock()
         else:
             SESSION_LOCK.unlink(missing_ok=True)
@@ -2665,7 +2766,8 @@ class ForcedFocusDaemon:
                     "cmd": sch["cmd"],
                 }
                 for sch in self.schedules
-            ]
+            ],
+            "recurring_schedules": self.recurring_schedules
         }
         if self.active and self.session_expiry:
             data.update(
@@ -2928,27 +3030,70 @@ class ForcedFocusDaemon:
         cmd_to_start = None
 
         with self.lock:
-            if getattr(self, "schedules", []):
+            now_mono = get_continuous_time()
+            now = datetime.now()
+
+            # 1. Evaluate recurring schedules every ~60 seconds
+            is_recurring_trigger = False
+            if self.recurring_schedules:
+                if now_mono - self._mono_last_recurring_check >= 60.0:
+                    self._mono_last_recurring_check = now_mono
+                    current_day = now.weekday()
+                    current_time = now.strftime("%H:%M")
+                    
+                    for r_sch in self.recurring_schedules:
+                        if current_day in r_sch.get("days_of_week", []):
+                            if r_sch.get("start_time") == current_time:
+                                last_triggered = r_sch.get("last_triggered")
+                                if last_triggered != now.strftime("%Y-%m-%d"):
+                                    r_sch["last_triggered"] = now.strftime("%Y-%m-%d")
+                                    cmd_to_start = {
+                                        "action": "start",
+                                        "duration_minutes": r_sch.get("duration_minutes", 120),
+                                        "mode": r_sch.get("mode", "blacklist"),
+                                        "groups": r_sch.get("groups", []),
+                                        "session_type": r_sch.get("session_type", "standard"),
+                                    }
+                                    # Forward pomodoro params if present
+                                    if r_sch.get("session_type") == "pomodoro":
+                                        cmd_to_start["focus_minutes"] = r_sch.get("focus_minutes", 25)
+                                        cmd_to_start["break_minutes"] = r_sch.get("break_minutes", 5)
+                                        cmd_to_start["cycles"] = r_sch.get("cycles", 4)
+                                    is_recurring_trigger = True
+                                    self._persist_session_lock()
+                                    logging.info("Recurring schedule %s triggered.", r_sch.get("id"))
+                                    break
+
+            # 2. Check one-off schedules if no recurring triggered
+            if not cmd_to_start and self.schedules:
                 # Check if the first schedule (sorted by start_time) is ready
                 if get_continuous_time() >= self.schedules[0].get("mono_start", float('inf')):
                     sch = self.schedules.pop(0)
                     cmd_to_start = sch["cmd"]
                     self._persist_session_lock()
-                    if self.active:
-                        # L1: Properly cleanup the active session before starting the scheduled one
-                        logging.info(
-                            "Active session being replaced by scheduled session. Cleaning up."
-                        )
-                        self._cleanup_session()
+                    # Do NOT cleanup_session here! We want _start_session to merge it.
 
         if cmd_to_start:
-            logging.info("Scheduled time reached. Automatically starting session.")
-            self._play_sound("scheduled")
-            self._send_mac_notification(
-                "Scheduled Session",
-                "Your scheduled focus session is starting now.",
-            )
-            self._start_session(cmd_to_start)
+            if is_recurring_trigger:
+                logging.info("Recurring schedule triggered. Starting session.")
+                self._play_sound("scheduled")
+                self._send_mac_notification(
+                    "Recurring Schedule",
+                    "Your recurring focus session is starting now.",
+                )
+            else:
+                logging.info("Scheduled time reached. Automatically starting session.")
+                self._play_sound("scheduled")
+                self._send_mac_notification(
+                    "Scheduled Session",
+                    "Your scheduled focus session is starting now.",
+                )
+            result = self._start_session(cmd_to_start)
+            if result.get("status") != "ok":
+                logging.warning(
+                    "Scheduled session failed to start: %s",
+                    result.get("message", "unknown error"),
+                )
             return
 
         with self.lock:
@@ -3260,6 +3405,12 @@ class ForcedFocusDaemon:
             return self._cmd_request_perma_unblock(cmd)
         elif action == "cancel_perma_unblock":
             return self._cmd_cancel_perma_unblock(cmd)
+        elif action == "get_recurring_schedules":
+            return self._cmd_get_recurring_schedules()
+        elif action == "add_recurring_schedule":
+            return self._cmd_add_recurring_schedule(cmd)
+        elif action == "remove_recurring_schedule":
+            return self._cmd_remove_recurring_schedule(cmd)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
@@ -3377,8 +3528,10 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if path == "/api/status":
+        elif path == "/api/status":
             self._send_json(self.server.daemon_ref._get_status())
+        elif path == "/api/schedules/recurring":
+            self._send_json(self.server.daemon_ref._cmd_get_recurring_schedules())
         elif path == "/api/stream":
             # Server-Sent Events (SSE) endpoint for real-time state updates
             self.send_response(200)
@@ -3480,7 +3633,8 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             self._send_json(self.server.daemon_ref._cmd_delete_sound(body))
         elif path == "/api/stop":
             self._send_json(self.server.daemon_ref._request_stop(body.get("key", "")))
-
+        elif path == "/api/schedules/recurring":
+            self._send_json(self.server.daemon_ref._cmd_add_recurring_schedule(body))
         elif path.startswith("/api/lists/"):
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[3] == "bulk":
@@ -3563,6 +3717,12 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
                 "name": parts[2],
             }
             self._send_json(self.server.daemon_ref._cmd_remove_group(cmd))
+        elif len(parts) == 4 and parts[0] == "api" and parts[1] == "schedules" and parts[2] == "recurring":
+            cmd = {
+                "action": "remove_recurring_schedule",
+                "id": parts[3]
+            }
+            self._send_json(self.server.daemon_ref._cmd_remove_recurring_schedule(cmd))
         else:
             self._send_json({"status": "error", "message": "Unknown endpoint."}, 404)
 

@@ -778,6 +778,125 @@ body::after {
   color: var(--text-muted);
 }
 
+/* ── Recurring Schedules UI ──────────────────────────────────────────────── */
+
+.day-btn {
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.day-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.day-btn.active {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--border-active);
+  color: var(--accent-blue);
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
+}
+
+.recurring-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  color: var(--text-primary);
+  padding: 8px 16px;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  transition: var(--transition);
+}
+
+.recurring-input:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.recurring-input::placeholder {
+  color: var(--text-muted);
+}
+
+.empty-list {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.recurring-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  margin-bottom: 16px;
+}
+
+.recurring-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  transition: var(--transition);
+  animation: fadeIn 0.25s ease;
+}
+
+.recurring-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.recurring-item .cal-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.recurring-remove {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 100px;
+  transition: var(--transition);
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.recurring-item:hover .recurring-remove {
+  opacity: 1;
+}
+
+.recurring-remove:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
 /* ── Custom Checkbox ─────────────────────────────────────────────────────── */
 
 .custom-checkbox {

@@ -133,6 +133,24 @@ chmod 644 "$PLIST_DST"
 chown root:wheel "$PLIST_DST"
 print_success "Binary and service definitions installed"
 
+print_step "Compiling and deploying Menu Bar Application"
+if [[ -f "${SCRIPT_DIR}/build_menubar.sh" ]]; then
+    # Build the menubar app
+    (cd "${SCRIPT_DIR}" && bash build_menubar.sh) > /dev/null
+    
+    # Deploy to Applications
+    APP_DST="/Applications/ForcedFocusBar.app"
+    rm -rf "$APP_DST"
+    cp -R "${SCRIPT_DIR}/ForcedFocusBar.app" "$APP_DST"
+    
+    # Set correct permissions
+    chown -R "$REAL_USER":staff "$APP_DST"
+    chmod -R 755 "$APP_DST"
+    print_success "Menu Bar App installed to ${APP_DST}"
+else
+    echo -e "${YELLOW}  ⚠ build_menubar.sh not found, skipping menubar app deployment.${NC}"
+fi
+
 # ── 3. Validation ─────────────────────────────────────────────────────────────
 print_step "Verifying system manifest"
 if ! plutil -lint "$PLIST_DST" &>/dev/null; then
