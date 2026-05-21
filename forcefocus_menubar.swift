@@ -22,12 +22,9 @@ class StatusBarItemManager {
 class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptMessageHandler {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
-    var timer: Timer?
     var webView: WKWebView?
     var errorCount = 0
     var isCurrentlyActive = false
-    var currentPollInterval = 5.0
-    var lastStatus: [String: Any]? = nil
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Create status item
@@ -42,8 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
         // Setup view controller with webview
         setupWebView()
         
-        // Start polling timer
-        scheduleTimer(interval: currentPollInterval)
+        // Native UI updates driven via JS nativeCallback SSE
         
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
@@ -83,9 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
         webView?.load(URLRequest(url: url))
     }
     
-    func scheduleTimer(interval: TimeInterval) {
-        // Obsolete: SSE from WebView now drives state updates via nativeCallback
-    }
+
     
     func popoverWillShow(_ notification: Notification) {
         webView?.evaluateJavaScript("window.onPopoverShow && window.onPopoverShow()")
@@ -150,14 +144,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
         popover.performClose(sender)
     }
     
-    @objc func pollStatus() {
-        // Obsolete: Replaced by JS SSE syncState
-    }
+
     
     func handleOffline(error: Error) {
         errorCount += 1
-        if errorCount > 3 {
+        if errorCount >= 3 {
             statusItem.button?.title = "⚠️ FF Offline"
+        }
+        
+        // Schedule retry load after 3 seconds to recover when daemon boots
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.loadMenuBarPage()
         }
     }
     
@@ -220,27 +217,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
         }
     }
     
-    func adjustPollingRate(_ json: [String: Any]) {
-        let isActive = json["active"] as? Bool ?? false
-        let newInterval: TimeInterval = isActive ? 1.0 : 5.0
-        
-        if newInterval != currentPollInterval {
-            currentPollInterval = newInterval
-            scheduleTimer(interval: currentPollInterval)
-        }
-    }
-    
-    func detectStateChanges(_ json: [String: Any]) {
-        // Detect significant state changes to trigger UI updates
-        if lastStatus?["active"] as? Bool != json["active"] as? Bool ||
-            lastStatus?["mode"] as? String != json["mode"] as? String ||
-            lastStatus?["session_type"] as? String != json["session_type"] as? String {
-            // Trigger UI refresh when state changes
-            NotificationCenter.default.post(name: NSNotification.Name("ForcedFocusStateChanged"), object: json)
-        }
-        
-        lastStatus = json
-    }
+
     
     // MARK: - WKScriptMessageHandler
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -266,7 +243,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
                 if let stateData = data["data"] as? [String: Any] {
                     errorCount = 0
                     updateStatusDisplay(stateData)
-                    detectStateChanges(stateData)
                 }
             default:
                 break
@@ -319,7 +295,20 @@ extension AppDelegate: WKNavigationDelegate, WKUIDelegate {
         decisionHandler(.allow)
     }
     
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        handleOffline(error: error)
+    }
+    
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        handleOffline(error: error)
+    }
+    
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        errorCount = 0
+        if statusItem.button?.title == "⚠️ FF Offline" {
+            statusItem.button?.title = "⚡ FF"
+        }
+        
         // Inject JavaScript to communicate with native layer
         let js = """
         window.nativeCallback = function(data) {

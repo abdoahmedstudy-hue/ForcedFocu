@@ -10,6 +10,19 @@ from forcefocus_daemon import ForcedFocusDaemon
 
 class TestForcedFocusDaemon(unittest.TestCase):
     def setUp(self):
+        # Override paths to avoid PermissionError on /etc/forcefocus when run as non-root
+        import forcefocus_daemon
+        forcefocus_daemon.CONFIG_DIR = Path("/tmp/forcefocus")
+        forcefocus_daemon.SESSION_LOCK = forcefocus_daemon.CONFIG_DIR / "session.lock"
+        forcefocus_daemon.LISTS_FILE = forcefocus_daemon.CONFIG_DIR / "lists.json"
+        forcefocus_daemon.GROUPS_FILE = forcefocus_daemon.CONFIG_DIR / "groups.json"
+        forcefocus_daemon.API_TOKEN_FILE = forcefocus_daemon.CONFIG_DIR / "api_token"
+        forcefocus_daemon.PERMA_BLOCK_FILE = forcefocus_daemon.CONFIG_DIR / "perma_blocklist.json"
+        forcefocus_daemon.HOSTS_PATH = Path("/tmp/hosts")
+
+        if not forcefocus_daemon.CONFIG_DIR.exists():
+            forcefocus_daemon.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
         # Initialize daemon without starting its threads or hitting filesystem too much
         with patch(
             "forcefocus_daemon.ForcedFocusDaemon._load_settings", return_value={}
@@ -412,6 +425,133 @@ class TestForcedFocusDaemon(unittest.TestCase):
         # Verify that the exception is caught and logged
         mock_logging_error.assert_called_once()
         self.assertIn("enforce_block failed", str(mock_logging_error.call_args))
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._verify_passphrase")
+    @patch("forcefocus_daemon.get_continuous_time", return_value=100.0)
+    @patch("forcefocus_daemon.ForcedFocusDaemon._save_perma_state")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_perma_block")
+    def test_perma_unblock_rate_limiting(self, mock_enforce, mock_save, mock_time, mock_verify):
+        import time
+        self.daemon.perma_blocklist = ["example.com"]
+        
+        # 1. Successful verify resets attempts
+        mock_verify.return_value = True
+        self.daemon._perma_passphrase_attempts = 2
+        cmd = {"domain": "example.com", "key": "secret"}
+        result = self.daemon._cmd_request_perma_unblock(cmd)
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(self.daemon._perma_passphrase_attempts, 0)
+        
+        # Clear pending unlock for next sub-tests
+        self.daemon.perma_pending_unlocks.clear()
+        self.daemon._mono_perma_unlock_ends.clear()
+
+        # 2. Failed verification increments attempts
+        mock_verify.return_value = False
+        cmd = {"domain": "example.com", "key": "wrong"}
+        result = self.daemon._cmd_request_perma_unblock(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(self.daemon._perma_passphrase_attempts, 1)
+
+        # 3. Hit the rate limit (5 attempts)
+        self.daemon._perma_passphrase_attempts = 5
+        self.daemon._perma_last_attempt_time = time.monotonic()
+        result = self.daemon._cmd_request_perma_unblock(cmd)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Too many attempts", result["message"])
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._verify_passphrase")
+    @patch("forcefocus_daemon.get_continuous_time", return_value=100.0)
+    @patch("forcefocus_daemon.ForcedFocusDaemon._save_perma_state")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_perma_block")
+    def test_session_cleanup_does_not_reset_perma_rate_limit(self, mock_enforce, mock_save, mock_time, mock_verify):
+        self.daemon.active = True
+        self.daemon.mode = "blacklist"
+        self.daemon._perma_passphrase_attempts = 4
+        self.daemon._passphrase_attempts = 3
+        
+        # Trigger cleanup
+        with patch("forcefocus_daemon.ForcedFocusDaemon._strip_block", return_value="stripped"):
+            with patch("forcefocus_daemon.Path.read_text", return_value="original"):
+                with patch("forcefocus_daemon.Path.write_text"):
+                    with patch("forcefocus_daemon.ForcedFocusDaemon._enforce_browser_policies"):
+                        with patch("forcefocus_daemon.ForcedFocusDaemon._enforce_firewall"):
+                            with patch("forcefocus_daemon.ForcedFocusDaemon._flush_dns"):
+                                self.daemon._cleanup_session()
+        
+        # Verify session level rate limit was reset, but perma was NOT
+        self.assertEqual(self.daemon._passphrase_attempts, 0)
+        self.assertEqual(self.daemon._perma_passphrase_attempts, 4)
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._load_perma_state")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_perma_block")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._restore_session")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._ensure_config_dir")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._ensure_lists_file")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._ensure_groups_file")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._ensure_perma_blocklist_file")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._generate_api_token")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._install_signal_handlers")
+    @patch("forcefocus_daemon.threading.Thread")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._socket_server")
+    def test_startup_cleanup_unconditional(
+        self, mock_socket, mock_thread, mock_sig, mock_token, mock_perma_file,
+        mock_groups, mock_lists, mock_config, mock_restore, mock_enforce_perma, mock_load_perma
+    ):
+        self.daemon.run()
+        # Should call _enforce_perma_block unconditionally
+        mock_enforce_perma.assert_called_once()
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_perma_block")
+    @patch("forcefocus_daemon.Path.stat")
+    @patch("forcefocus_daemon.Path.read_text")
+    def test_watchdog_detects_tamper_and_uses_cache(self, mock_read_text, mock_stat, mock_enforce_perma):
+        import hashlib
+        from forcefocus_daemon import PERMA_MARKER_BEGIN, PERMA_MARKER_END
+        
+        self.daemon.perma_blocklist = ["example.com"]
+        self.daemon._perma_hosts_hash = hashlib.sha256(
+            (PERMA_MARKER_BEGIN + "\n127.0.0.1\texample.com\n" + PERMA_MARKER_END).encode()
+        ).hexdigest()
+        
+        # Mock stat response
+        mock_stat_obj = MagicMock()
+        mock_stat_obj.st_mtime = 12345.0
+        mock_stat_obj.st_size = 100
+        mock_stat.return_value = mock_stat_obj
+        
+        self.daemon._perma_hosts_stat = (12345.0, 100)
+        
+        # 1. Cache hit case
+        self.daemon._wd_perma_counter = 7
+        self.daemon._watchdog_tick()
+        mock_read_text.assert_not_called()
+        mock_enforce_perma.assert_not_called()
+        
+        # 2. Cache miss, correct content case
+        self.daemon._wd_perma_counter = 7
+        self.daemon._perma_hosts_stat = (12345.0, 99) # different size
+        mock_read_text.return_value = f"{PERMA_MARKER_BEGIN}\n127.0.0.1\texample.com\n{PERMA_MARKER_END}\n"
+        self.daemon._watchdog_tick()
+        mock_read_text.assert_called_once()
+        mock_enforce_perma.assert_not_called()
+        self.assertEqual(self.daemon._perma_hosts_stat, (12345.0, 100)) # cache updated
+        
+        # 3. Mismatched content (hash difference) -> re-enforce
+        mock_read_text.reset_mock()
+        self.daemon._wd_perma_counter = 7
+        self.daemon._perma_hosts_stat = (12345.0, 99)
+        mock_read_text.return_value = f"{PERMA_MARKER_BEGIN}\n127.0.0.1\ttampered.com\n{PERMA_MARKER_END}\n"
+        self.daemon._watchdog_tick()
+        mock_enforce_perma.assert_called_once()
+        
+        # 4. Out of order or missing markers -> re-enforce
+        mock_enforce_perma.reset_mock()
+        self.daemon._wd_perma_counter = 7
+        self.daemon._perma_hosts_stat = (12345.0, 99)
+        mock_read_text.return_value = f"{PERMA_MARKER_END}\n127.0.0.1\texample.com\n{PERMA_MARKER_BEGIN}\n"
+        self.daemon._watchdog_tick()
+        mock_enforce_perma.assert_called_once()
 
 
 if __name__ == "__main__":

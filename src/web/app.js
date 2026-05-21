@@ -122,6 +122,9 @@ const els = {
   permaBlockInput: $("#permaBlockInput"),
   permaBlockDomains: $("#permaBlockDomains"),
   permaBlockCount: $("#permaBlockCount"),
+  permaUnblockModal: $("#permaUnblockModal"),
+  permaUnblockInput: $("#permaUnblockInput"),
+  permaUnblockError: $("#permaUnblockError"),
 };
 
 // ── API Helpers ──────────────────────────────────────────────────────────────
@@ -916,62 +919,18 @@ async function addPermaBlock() {
 }
 
 function requestPermaUnblock(domain) {
-  // Reuse the stop modal for passphrase entry
-  const modal = els.stopModal;
-  const input = els.passphraseInput;
-  const error = els.modalError;
+  const modal = els.permaUnblockModal;
+  const input = els.permaUnblockInput;
+  const error = els.permaUnblockError;
 
   modal.classList.remove("hidden");
+  modal.dataset.domain = domain;
   input.value = "";
-  if (error) error.textContent = "";
+  if (error) {
+    error.textContent = "";
+    error.classList.add("hidden");
+  }
   input.focus();
-
-  // Replace modal title/description temporarily
-  const modalEl = modal.querySelector(".modal");
-  const origTitle = modalEl.querySelector("h2").textContent;
-  const origDesc = modalEl.querySelector("p").textContent;
-  modalEl.querySelector("h2").textContent = "\uD83D\uDD12 Unblock " + domain;
-  modalEl.querySelector("p").textContent =
-    "Enter your passphrase to start the 30-minute unblock timer.";
-
-  // Override confirm button
-  const confirmBtn = modalEl.querySelector(".btn-confirm");
-  const origConfirmText = confirmBtn.textContent;
-  confirmBtn.textContent = "Start Unblock Timer";
-
-  const cleanup = () => {
-    modalEl.querySelector("h2").textContent = origTitle;
-    modalEl.querySelector("p").textContent = origDesc;
-    confirmBtn.textContent = origConfirmText;
-    confirmBtn.onclick = null;
-    modal.classList.add("hidden");
-  };
-
-  confirmBtn.onclick = async () => {
-    const key = input.value;
-    if (!key) {
-      if (error) error.textContent = "Please enter your passphrase.";
-      return;
-    }
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Verifying...";
-    try {
-      const res = await api("POST", "/api/perma-blocklist/unblock", {
-        domain,
-        key,
-      });
-      if (res.status === "pending") {
-        cleanup();
-        showToast(`\u23F3 Unblock timer started for ${domain} (30 min)`);
-        refreshPermaBlocklist();
-      } else if (res.status === "error") {
-        if (error) error.textContent = res.message;
-      }
-    } finally {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Start Unblock Timer";
-    }
-  };
 }
 
 async function cancelPermaUnblock(domain) {
@@ -1503,10 +1462,64 @@ function initEvents() {
     }
   });
 
+  // Cancel permanent unblock
+  $("#btnCancelPermaUnblock").addEventListener("click", () => {
+    els.permaUnblockModal.classList.add("hidden");
+  });
+
+  // Confirm permanent unblock
+  $("#btnConfirmPermaUnblock").addEventListener("click", async () => {
+    const domain = els.permaUnblockModal.dataset.domain;
+    const key = els.permaUnblockInput.value;
+    if (!key) {
+      els.permaUnblockError.textContent = "Please enter your passphrase.";
+      els.permaUnblockError.classList.remove("hidden");
+      return;
+    }
+
+    const btn = $("#btnConfirmPermaUnblock");
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Verifying...";
+
+    try {
+      const res = await api("POST", "/api/perma-blocklist/unblock", {
+        domain,
+        key,
+      });
+      if (res.status === "pending") {
+        els.permaUnblockModal.classList.add("hidden");
+        showToast(`\u23F3 Unblock timer started for ${domain} (30 min)`);
+        refreshPermaBlocklist();
+      } else {
+        els.permaUnblockError.textContent = res.message || "Invalid passphrase.";
+        els.permaUnblockError.classList.remove("hidden");
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+
+  // Modal permanent unblock passphrase enter key
+  els.permaUnblockInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#btnConfirmPermaUnblock").click();
+  });
+
+  // Close permanent unblock modal on overlay click
+  els.permaUnblockModal.addEventListener("click", (e) => {
+    if (e.target === els.permaUnblockModal) els.permaUnblockModal.classList.add("hidden");
+  });
+
   // R5: Close modal on Escape key
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !els.stopModal.classList.contains("hidden")) {
-      els.stopModal.classList.add("hidden");
+    if (e.key === "Escape") {
+      if (!els.stopModal.classList.contains("hidden")) {
+        els.stopModal.classList.add("hidden");
+      }
+      if (!els.permaUnblockModal.classList.contains("hidden")) {
+        els.permaUnblockModal.classList.add("hidden");
+      }
     }
   });
 }

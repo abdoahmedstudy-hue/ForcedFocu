@@ -867,28 +867,51 @@ def build_parser():
     
     p_schedule.set_defaults(func=cmd_schedule)
 
-    # perma-block
-    p_perma = sub.add_parser(
-        "perma-block", help="Manage permanent blocklist (always-on, session-independent)"
-    )
-    p_perma.add_argument(
+    # perma-block parent parser for inheriting human and agent flags
+    perma_parent = argparse.ArgumentParser(add_help=False)
+    perma_parent.add_argument(
         "--human", "-H", action="store_true", help="Force human-friendly output"
     )
-    p_perma.add_argument(
+    perma_parent.add_argument(
         "--agent", "-A", action="store_true", help="Force agent-friendly output"
     )
-    p_perma.add_argument(
-        "action",
-        choices=["list", "add", "unblock", "cancel"],
-        help="Permanent block action",
+
+    p_perma = sub.add_parser(
+        "perma-block",
+        parents=[perma_parent],
+        help="Manage permanent blocklist (always-on, session-independent)",
     )
-    p_perma.add_argument(
-        "domain", nargs="?", help="Domain for 'unblock' or 'cancel'"
+    sub_perma = p_perma.add_subparsers(dest="action", help="Permanent block action")
+    sub_perma.required = True
+
+    p_perma_list = sub_perma.add_parser(
+        "list",
+        parents=[perma_parent],
+        help="List permanently blocked domains",
     )
-    p_perma.add_argument(
-        "domains", nargs="*", help="Domain(s) for 'add'"
+    
+    p_perma_add = sub_perma.add_parser(
+        "add",
+        parents=[perma_parent],
+        help="Add domains to permanent blocklist",
     )
-    p_perma.add_argument("--key", "-k", help="Kill-switch passphrase (for unblock)")
+    p_perma_add.add_argument("domains", nargs="+", help="Domain(s) to add")
+
+    p_perma_unblock = sub_perma.add_parser(
+        "unblock",
+        parents=[perma_parent],
+        help="Request permanent unblock",
+    )
+    p_perma_unblock.add_argument("domain", help="Domain to unblock")
+    p_perma_unblock.add_argument("--key", "-k", help="Kill-switch passphrase (for unblock)")
+
+    p_perma_cancel = sub_perma.add_parser(
+        "cancel",
+        parents=[perma_parent],
+        help="Cancel a pending permanent unblock",
+    )
+    p_perma_cancel.add_argument("domain", help="Domain to cancel")
+
     p_perma.set_defaults(func=cmd_perma_block)
 
     return parser

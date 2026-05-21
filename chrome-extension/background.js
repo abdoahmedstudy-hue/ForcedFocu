@@ -33,6 +33,13 @@ let currentBlockMode = null;
 let permaBlockedSet = new Set();
 let lastPermaHash = ""; // Hash of perma domains to detect changes
 
+// Cache variables
+let cachedPermaData = null;
+let cachedSettings = null;
+
+// Track active blocked tab ports
+const activePorts = new Set();
+
 // Analytics
 let analytics = {
   blockedRequests: 0,
@@ -59,6 +66,9 @@ async function loadState() {
       "blockedDomains",
       "currentBlockMode",
       "permaDomains",
+      "cachedStatus",
+      "cachedPermaData",
+      "cachedSettings",
     ]);
     lastActive = result.lastActive || false;
     lastMode = result.lastMode || null;
@@ -71,6 +81,9 @@ async function loadState() {
     if (result.permaDomains && Array.isArray(result.permaDomains)) {
       permaBlockedSet = new Set(result.permaDomains);
     }
+    cachedStatus = result.cachedStatus || null;
+    cachedPermaData = result.cachedPermaData || null;
+    cachedSettings = result.cachedSettings || null;
   } catch (e) {
     // storage.session may not be available in older Chrome versions
     console.warn("[ForcedFocus] Could not load session state:", e);
@@ -87,11 +100,17 @@ async function saveState() {
       blockedDomains: [...blockedDomainsSet].slice(0, 5000),
       currentBlockMode,
       permaDomains: [...permaBlockedSet].slice(0, 5000),
+      cachedStatus,
+      cachedPermaData,
+      cachedSettings,
     });
   } catch (e) {
     // Non-critical — state will just be re-synced on next poll
   }
 }
+
+// Define state loaded promise
+const stateLoadedPromise = loadState();
 
 // ── Utility Functions ─────────────────────────────────────────────────────────
 
@@ -463,6 +482,11 @@ async function syncPermaBlocklist() {
     });
     if (!response.ok) return;
     const data = await response.json();
+    
+    // Cache the full payload containing domains and pending_unlocks
+    cachedPermaData = data;
+    await saveState();
+
     const domains = data.domains || [];
 
     // Quick hash check to avoid unnecessary rule rebuilds
@@ -488,6 +512,21 @@ async function syncPermaBlocklist() {
     // If a session IS active, the rules will be merged on next applyBlockRules call
   } catch (e) {
     // Non-critical — will retry on next sync cycle
+  }
+}
+
+async function syncSettings() {
+  try {
+    const response = await fetch(`${API}/api/settings`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    cachedSettings = data;
+    await saveState();
+    log("Settings synced.");
+  } catch (e) {
+    // Non-critical
   }
 }
 
@@ -531,10 +570,16 @@ async function syncBlockRules(status = null) {
   try {
     if (!status) {
       status = await fetchSessionStatus();
+    } else {
+      cachedStatus = status;
+      cacheTimestamp = Date.now();
     }
 
     // Sync permanent blocklist from daemon
     await syncPermaBlocklist();
+
+    // Sync settings from daemon
+    await syncSettings();
 
     // Reset connection attempts on successful fetch
     connectionAttempts = 0;
@@ -641,6 +686,9 @@ async function syncBlockRules(status = null) {
     } else {
       chrome.action.setBadgeText({ text: "" });
     }
+
+    // Broadcast state to active blocked tab ports
+    broadcastToBlockedTabs();
   } catch (error) {
     connectionAttempts++;
     log(
@@ -670,9 +718,11 @@ async function syncBlockRules(status = null) {
 const _notifiedDomains = new Map();
 const NOTIF_DEBOUNCE_MS = 3000;
 
-chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   // Only intercept top-level navigations (not iframes, etc.)
   if (details.frameId !== 0) return;
+
+  await stateLoadedPromise;
 
   if (shouldBlockUrl(details.url)) {
     const hostname = extractHostname(details.url);
@@ -709,7 +759,7 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
  * ERR_CONNECTION_REFUSED. This listener catches that error and
  * redirects to blocked.html as a fallback.
  */
-chrome.webNavigation.onErrorOccurred.addListener((details) => {
+chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   // Only handle top-level navigation errors
   if (details.frameId !== 0) return;
 
@@ -725,6 +775,8 @@ chrome.webNavigation.onErrorOccurred.addListener((details) => {
   ];
 
   if (!blockErrors.includes(details.error)) return;
+
+  await stateLoadedPromise;
 
   // Check if this URL belongs to a blocked domain
   if (shouldBlockUrl(details.url)) {
@@ -768,6 +820,24 @@ function connectSSE() {
   };
 }
 
+function broadcastToBlockedTabs() {
+  const payload = {
+    action: "stateUpdated",
+    status: cachedStatus,
+    permaBlocklist: cachedPermaData,
+    settings: cachedSettings,
+  };
+  log(`Broadcasting state to ${activePorts.size} active blocked tab ports.`);
+  for (const port of activePorts) {
+    try {
+      port.postMessage(payload);
+    } catch (e) {
+      log(`Failed to post message to port: ${e.message}`, "error");
+      activePorts.delete(port);
+    }
+  }
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "syncRules") {
     // If SSE is active, it handles updates. If disconnected, alarm is a fallback.
@@ -779,7 +849,7 @@ chrome.runtime.onStartup.addListener(() => {
   log("Extension started");
   chrome.alarms.create("syncRules", { periodInMinutes: 1 });
   connectSSE();
-  loadState().then(() => syncBlockRules());
+  stateLoadedPromise.then(() => syncBlockRules());
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -793,12 +863,54 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
   chrome.alarms.create("syncRules", { periodInMinutes: 1 });
   connectSSE();
-  loadState().then(() => syncBlockRules());
+  stateLoadedPromise.then(() => syncBlockRules());
 });
 
 // Also run immediately on service worker start (covers wakeup from suspension)
 connectSSE();
-loadState().then(() => syncBlockRules());
+stateLoadedPromise.then(() => syncBlockRules());
+
+// ── Connection Management ──────────────────────────────────────────────────────
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "blocked-tab") {
+    activePorts.add(port);
+    log(`Blocked tab connected. Total active ports: ${activePorts.size}`);
+
+    // Push initial state immediately inside onConnect (Push on Connect)
+    if (cachedStatus || cachedPermaData || cachedSettings) {
+      try {
+        port.postMessage({
+          action: "stateUpdated",
+          status: cachedStatus,
+          permaBlocklist: cachedPermaData,
+          settings: cachedSettings,
+        });
+      } catch (e) {
+        log(`Failed to send initial state to port: ${e.message}`, "error");
+        activePorts.delete(port);
+      }
+    } else {
+      syncBlockRules().then(() => {
+        try {
+          port.postMessage({
+            action: "stateUpdated",
+            status: cachedStatus,
+            permaBlocklist: cachedPermaData,
+            settings: cachedSettings,
+          });
+        } catch (e) {
+          activePorts.delete(port);
+        }
+      });
+    }
+
+    port.onDisconnect.addListener(() => {
+      activePorts.delete(port);
+      log(`Blocked tab disconnected. Total active ports: ${activePorts.size}`);
+    });
+  }
+});
 
 // ── Message Handling ──────────────────────────────────────────────────────────
 
@@ -818,6 +930,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
     chrome.storage.local.set({ analytics });
     sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === "getBlockState") {
+    stateLoadedPromise.then(async () => {
+      if (!cachedStatus) {
+        try {
+          await fetchSessionStatus();
+        } catch (e) {}
+      }
+      if (!cachedPermaData) {
+        try {
+          await syncPermaBlocklist();
+        } catch (e) {}
+      }
+      if (!cachedSettings) {
+        try {
+          await syncSettings();
+        } catch (e) {}
+      }
+      sendResponse({
+        status: cachedStatus,
+        permaBlocklist: cachedPermaData,
+        settings: cachedSettings,
+      });
+    });
     return true;
   }
 

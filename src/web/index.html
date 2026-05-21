@@ -509,6 +509,28 @@
       </div>
     </div>
 
+    <!-- Permanent Unblock Modal -->
+    <div class="modal-overlay hidden" id="permaUnblockModal">
+      <div class="modal">
+        <h2>🔓 Permanent Unblock</h2>
+        <p>
+          Enter your kill-switch passphrase to request unblocking of the domain.<br />
+          <strong>Unblocking will take effect after a 30-minute delay</strong>.
+        </p>
+        <form id="permaUnblockForm" onsubmit="return false;">
+          <label for="permaUnblockInput" class="sr-only">Kill-switch passphrase</label>
+          <input type="password" id="permaUnblockInput" placeholder="Kill-switch passphrase" autocomplete="off" />
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelPermaUnblock">Cancel</button>
+          <button class="btn btn-confirm" id="btnConfirmPermaUnblock">
+            Request Unblock
+          </button>
+        </div>
+        <p class="modal-error hidden" id="permaUnblockError"></p>
+      </div>
+    </div>
+
     <!-- Intent Modal -->
     <div class="modal-overlay hidden" id="intentModal">
       <div class="modal">

@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import logging
 import threading
+import queue
 import subprocess
 import concurrent.futures
 import mimetypes
@@ -525,6 +526,8 @@ class ForcedFocusDaemon:
         self.active = False
         self.mode = "blacklist"
         self.state_changed = threading.Event()
+        self._sse_listeners = set()
+        self._sse_listeners_lock = threading.Lock()
         self.active_domains: list[str] = []
         self.active_domains_set: set[str] = set()
         self.session_base_domains: list[str] = (
@@ -571,8 +574,28 @@ class ForcedFocusDaemon:
         self.perma_pending_unlocks: dict[str, datetime] = {}  # domain → unlock-ready-at
         self._mono_perma_unlock_ends: dict[str, float] = {}  # domain → monotonic anchor
         self._perma_hosts_hash: str | None = None  # SHA256 of permanent block in /etc/hosts
+        self._perma_passphrase_attempts = 0
+        self._perma_last_attempt_time = 0.0
+        self._perma_hosts_stat: tuple[float, int] | None = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def register_sse_listener(self, q):
+        with self._sse_listeners_lock:
+            self._sse_listeners.add(q)
+
+    def unregister_sse_listener(self, q):
+        with self._sse_listeners_lock:
+            self._sse_listeners.discard(q)
+
+    def broadcast_state_changed(self):
+        self.state_changed.set()
+        with self._sse_listeners_lock:
+            for q in self._sse_listeners:
+                try:
+                    q.put_nowait(True)
+                except queue.Full:
+                    pass
 
     def run(self):
         setup_logging()
@@ -585,8 +608,7 @@ class ForcedFocusDaemon:
         self._install_signal_handlers()
         # Load permanent blocklist and enforce immediately (before session restore)
         self._load_perma_state()
-        if self.perma_blocklist:
-            self._enforce_perma_block()
+        self._enforce_perma_block()
         # Restore session BEFORE starting watchdog to avoid race (C2)
         with self.lock:
             self._restore_session()
@@ -806,7 +828,7 @@ class ForcedFocusDaemon:
                 return {"status": "error", "message": "No valid new domains to add."}
             self._save_perma_state()
             self._enforce_perma_block()
-            self.state_changed.set()
+            self.broadcast_state_changed()
             logging.info("Added %d domain(s) to permanent blocklist.", added)
             return {
                 "status": "ok",
@@ -837,29 +859,29 @@ class ForcedFocusDaemon:
                         "remaining_seconds": rem,
                     }
 
-            # Rate limit passphrase attempts (reuse session rate limiter)
+            # Rate limit passphrase attempts (decoupled from session rate limiter)
             now_mono_rl = time.monotonic()
-            if self._passphrase_attempts >= 5:
-                cooldown = min(60, 2 ** (self._passphrase_attempts - 5))
-                elapsed = now_mono_rl - self._last_attempt_time
+            if self._perma_passphrase_attempts >= 5:
+                cooldown = min(60, 2 ** (self._perma_passphrase_attempts - 5))
+                elapsed = now_mono_rl - self._perma_last_attempt_time
                 if elapsed < cooldown:
                     wait = int(cooldown - elapsed)
                     return {
                         "status": "error",
                         "message": f"Too many attempts. Wait {wait}s.",
                     }
-            self._last_attempt_time = now_mono_rl
+            self._perma_last_attempt_time = now_mono_rl
 
             if not self._verify_passphrase(passphrase):
-                self._passphrase_attempts += 1
+                self._perma_passphrase_attempts += 1
                 logging.warning(
                     "Invalid passphrase for permanent unblock attempt (#%d).",
-                    self._passphrase_attempts,
+                    self._perma_passphrase_attempts,
                 )
                 return {"status": "error", "message": "Invalid passphrase."}
 
             # Reset rate limiter on success
-            self._passphrase_attempts = 0
+            self._perma_passphrase_attempts = 0
 
             # Start 30-minute cooldown
             unlocks_at = datetime.now() + timedelta(seconds=PERMA_UNLOCK_DELAY_S)
@@ -868,7 +890,7 @@ class ForcedFocusDaemon:
                 get_continuous_time() + PERMA_UNLOCK_DELAY_S
             )
             self._save_perma_state()
-            self.state_changed.set()
+            self.broadcast_state_changed()
             unlock_str = unlocks_at.strftime("%H:%M:%S")
             logging.info(
                 "Permanent unblock requested for '%s' — unlocks at %s.",
@@ -897,7 +919,7 @@ class ForcedFocusDaemon:
             del self.perma_pending_unlocks[domain]
             self._mono_perma_unlock_ends.pop(domain, None)
             self._save_perma_state()
-            self.state_changed.set()
+            self.broadcast_state_changed()
             logging.info("Cancelled permanent unblock for '%s'.", domain)
             return {
                 "status": "ok",
@@ -920,8 +942,14 @@ class ForcedFocusDaemon:
                     ["chflags", "uchg", str(HOSTS_PATH)], capture_output=True, timeout=5
                 )
                 self._perma_hosts_hash = None
+                try:
+                    st = HOSTS_PATH.stat()
+                    self._perma_hosts_stat = (st.st_mtime, st.st_size)
+                except Exception:
+                    self._perma_hosts_stat = None
             except Exception as exc:
                 logging.error("_enforce_perma_block (cleanup) failed: %s", exc)
+                self._perma_hosts_stat = None
             return
 
         try:
@@ -936,6 +964,11 @@ class ForcedFocusDaemon:
                 ["chflags", "uchg", str(HOSTS_PATH)], capture_output=True, timeout=5
             )
             self._perma_hosts_hash = hashlib.sha256(block.encode()).hexdigest()
+            try:
+                st = HOSTS_PATH.stat()
+                self._perma_hosts_stat = (st.st_mtime, st.st_size)
+            except Exception:
+                self._perma_hosts_stat = None
             self._flush_dns()
             logging.info(
                 "Permanent block enforced: %d domains in /etc/hosts.",
@@ -943,6 +976,7 @@ class ForcedFocusDaemon:
             )
         except Exception as exc:
             logging.error("_enforce_perma_block failed: %s", exc)
+            self._perma_hosts_stat = None
 
     def _build_perma_block(self) -> str:
         """Build the /etc/hosts block for permanently blocked domains."""
@@ -1361,7 +1395,7 @@ class ForcedFocusDaemon:
             if intent_tasks is not None:
                 self.intent_tasks = intent_tasks
             self._persist_session_lock()
-            self.state_changed.set()
+            self.broadcast_state_changed()
             logging.info("Session intent updated.")
             return {"status": "ok", "message": "Intent updated."}
 
@@ -1468,7 +1502,7 @@ class ForcedFocusDaemon:
                         # We skip expanding the whitelist during a merge to enforce strictness.
 
                     self._persist_session_lock()
-                    self.state_changed.set()
+                    self.broadcast_state_changed()
                     
                     msg = f"Session merged. Extended by {added_minutes} minutes." if added_minutes > 0 else "Session merged. Constraints updated."
                     logging.info(msg)
@@ -1685,7 +1719,7 @@ class ForcedFocusDaemon:
                     msg,
                     subtitle=self.session_expiry.strftime("Expires at %H:%M"),
                 )
-            self.state_changed.set()
+            self.broadcast_state_changed()
             return {
                 "status": "ok",
                 "message": msg,
@@ -1734,7 +1768,7 @@ class ForcedFocusDaemon:
             self._mono_unlock_end = get_continuous_time() + DELAYED_UNLOCK_S
             self._persist_session_lock()
             self._play_sound("unlock")
-            self.state_changed.set()
+            self.broadcast_state_changed()
             unlock_str = self.pending_unlock_at.strftime("%H:%M:%S")
             logging.info("Delayed unlock requested — scheduled at %s.", unlock_str)
             return {
@@ -1764,7 +1798,7 @@ class ForcedFocusDaemon:
                             return {"status": "error", "message": "Cannot cancel schedule with 20 minutes or less remaining."}
                         sch = self.schedules.pop(idx)
                         self._persist_session_lock()
-                        self.state_changed.set()
+                        self.broadcast_state_changed()
                         return {"status": "ok", "message": f"Cancelled schedule for {sch['start_time'].strftime('%H:%M')}."}
                     else:
                         return {"status": "error", "message": "Invalid schedule index."}
@@ -1777,7 +1811,7 @@ class ForcedFocusDaemon:
                             return {"status": "error", "message": "Cannot cancel schedule with 20 minutes or less remaining."}
                         self.schedules.pop(i)
                         self._persist_session_lock()
-                        self.state_changed.set()
+                        self.broadcast_state_changed()
                         return {"status": "ok", "message": f"Cancelled schedule for {sch['start_time'].strftime('%H:%M')}."}
                 return {"status": "error", "message": "Schedule not found."}
                 
@@ -1817,7 +1851,7 @@ class ForcedFocusDaemon:
                 new_rule["cycles"] = cmd.get("cycles", 4)
             self.recurring_schedules.append(new_rule)
             self._persist_session_lock()
-            self.state_changed.set()
+            self.broadcast_state_changed()
             return {"status": "ok", "message": "Recurring schedule added.", "rule": new_rule}
 
     def _cmd_remove_recurring_schedule(self, cmd: dict) -> dict:
@@ -1830,7 +1864,7 @@ class ForcedFocusDaemon:
             self.recurring_schedules = [r for r in self.recurring_schedules if r["id"] != rule_id]
             if len(self.recurring_schedules) < initial_len:
                 self._persist_session_lock()
-                self.state_changed.set()
+                self.broadcast_state_changed()
                 return {"status": "ok", "message": "Recurring schedule removed."}
             return {"status": "error", "message": "Recurring schedule not found."}
 
@@ -2433,7 +2467,7 @@ class ForcedFocusDaemon:
                 self.pomo_current_cycle,
                 self.pomo_total_cycles,
             )
-        self.state_changed.set()
+        self.broadcast_state_changed()
 
     def _cleanup_session(self):
         logging.info("Cleaning up session (mode=%s)...", self.mode)
@@ -2495,7 +2529,7 @@ class ForcedFocusDaemon:
         self._passphrase_attempts = 0
         self.intent = None
         self.intent_tasks = []
-        self.state_changed.set()
+        self.broadcast_state_changed()
         # Do NOT clear schedules on session cleanup!
         logging.info("Session ended. Hosts restored. DNS flushed.")
         # Re-enforce permanent blocks (session cleanup may have modified /etc/hosts)
@@ -3134,22 +3168,62 @@ class ForcedFocusDaemon:
                         )
                     self._save_perma_state()
                     self._enforce_perma_block()
-                    self.state_changed.set()
+                    self.broadcast_state_changed()
 
                 # Integrity check: permanent block markers in /etc/hosts (~every 2s)
                 self._wd_perma_counter = getattr(self, "_wd_perma_counter", 0) + 1
                 if self._wd_perma_counter >= 8:  # 8 * 250ms = 2s
                     self._wd_perma_counter = 0
-                    if self.perma_blocklist and self._perma_hosts_hash:
-                        try:
-                            content = HOSTS_PATH.read_text()
-                            if PERMA_MARKER_BEGIN not in content:
-                                logging.warning(
-                                    "PERMANENT BLOCK TAMPER DETECTED (markers missing). Re-enforcing."
-                                )
-                                self._enforce_perma_block()
-                        except Exception as exc:
-                            logging.error("Watchdog perma hosts check error: %s", exc)
+                    if self.perma_blocklist:
+                        if not self._perma_hosts_hash:
+                            logging.warning(
+                                "Permanent blocklist active but hosts hash is missing. Enforcing."
+                            )
+                            self._enforce_perma_block()
+                        else:
+                            try:
+                                st = HOSTS_PATH.stat()
+                                current_stat = (st.st_mtime, st.st_size)
+                                if self._perma_hosts_stat is not None and current_stat == self._perma_hosts_stat:
+                                    pass  # File untouched since last verified check
+                                else:
+                                    content = HOSTS_PATH.read_text()
+                                    lines = content.split("\n")
+                                    normalized_lines = [line.rstrip("\r") for line in lines]
+                                    
+                                    # Locate markers and detect duplicates
+                                    begin_idx = -1
+                                    end_idx = -1
+                                    tampered = False
+                                    
+                                    for idx, line in enumerate(normalized_lines):
+                                        if PERMA_MARKER_BEGIN in line:
+                                            if begin_idx != -1:
+                                                tampered = True
+                                                break
+                                            begin_idx = idx
+                                        if PERMA_MARKER_END in line:
+                                            if end_idx != -1:
+                                                tampered = True
+                                                break
+                                            end_idx = idx
+                                    
+                                    if tampered or begin_idx == -1 or end_idx == -1 or begin_idx >= end_idx:
+                                        logging.warning("PERMANENT BLOCK TAMPER DETECTED (markers missing or invalid). Re-enforcing.")
+                                        self._enforce_perma_block()
+                                    else:
+                                        # Extract block content and verify hash
+                                        block_lines = normalized_lines[begin_idx : end_idx + 1]
+                                        block_content = "\n".join(block_lines)
+                                        current_hash = hashlib.sha256(block_content.encode("utf-8")).hexdigest()
+                                        if current_hash != self._perma_hosts_hash:
+                                            logging.warning("PERMANENT BLOCK TAMPER DETECTED (content mismatch). Re-enforcing.")
+                                            self._enforce_perma_block()
+                                        else:
+                                            # Hash is correct, save stat cache
+                                            self._perma_hosts_stat = current_stat
+                            except Exception as exc:
+                                logging.error("Watchdog perma hosts check error: %s", exc)
 
             if not self.active:
                 return
@@ -3543,20 +3617,38 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             self.end_headers()
             
             daemon = self.server.daemon_ref
+            q = queue.Queue(maxsize=10)
+            daemon.register_sse_listener(q)
+            
+            last_written_body = None
+            last_written_time = 0.0
+            
             try:
                 while True:
-                    # Send current status
                     status_data = daemon._get_status()
                     body = json.dumps(status_data)
-                    self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
-                    self.wfile.flush()
+                    now = time.time()
                     
-                    # Wait for state change or max 1 second to pulse timer
-                    daemon.state_changed.wait(timeout=1.0)
-                    daemon.state_changed.clear()
+                    if body != last_written_body or now - last_written_time >= 10.0:
+                        self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        last_written_body = body
+                        last_written_time = now
+                        
+                    timeout = 0.5 if daemon.active else 5.0
+                    try:
+                        q.get(timeout=timeout)
+                        while not q.empty():
+                            try:
+                                q.get_nowait()
+                            except queue.Empty:
+                                break
+                    except queue.Empty:
+                        pass
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
-                # Client disconnected, perfectly normal
                 pass
+            finally:
+                daemon.unregister_sse_listener(q)
             return
         elif path == "/api/session-domains":
             self._send_json(self.server.daemon_ref._cmd_get_session_domains())

@@ -7,6 +7,7 @@ let countdownInterval = null;
 let apiToken = "";
 let selectedGroups = [];
 let availableGroups = {};
+let isPopoverVisible = false;
 
 const AudioManager = {
   settings: {},
@@ -651,6 +652,7 @@ function initEvents() {
 let globalPollInterval = null;
 
 window.onPopoverShow = () => {
+  isPopoverVisible = true;
   loadSettings();
   fetchGroups();
   refresh();
@@ -670,6 +672,7 @@ async function loadSettings() {
 }
 
 window.onPopoverHide = () => {
+  isPopoverVisible = false;
   // Keep SSE active to drive the native menubar countdown via nativeCallback
   if (countdownInterval) {
     clearInterval(countdownInterval);
@@ -687,9 +690,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // S8: Load settings and refresh status immediately, don't wait for onPopoverShow
   loadSettings();
   fetchGroups();
-  refresh();
+  // Wait for onPopoverShow to call refresh() and start globalPollInterval.
+  // We only connect SSE so the native title updates!
   connectSSE();
-  if (!globalPollInterval) globalPollInterval = setInterval(refresh, 1000);
 });
 
 let eventSource = null;
@@ -701,7 +704,9 @@ function connectSSE() {
   eventSource.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
-      renderStatus(data);
+      if (isPopoverVisible) {
+        renderStatus(data);
+      }
       if (window.webkit && window.webkit.messageHandlers.nativeCallback) {
         window.webkit.messageHandlers.nativeCallback.postMessage({ action: "syncState", data: data });
       }

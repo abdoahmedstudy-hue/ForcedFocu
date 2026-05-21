@@ -104,6 +104,36 @@ class TestForceFocusCLIParser(unittest.TestCase):
         self.assertEqual(args.domains, ["domain.com", "domain.org"])
         self.assertEqual(args.func, forcefocus_cli.cmd_groups)
 
+    def test_perma_block_subcommand(self):
+        """Test 'perma-block' subcommand and its sub-subcommands."""
+        # 1. perma-block list with --human
+        args = self.parser.parse_args(["perma-block", "list", "--human"])
+        self.assertEqual(args.command, "perma-block")
+        self.assertEqual(args.action, "list")
+        self.assertTrue(args.human)
+        self.assertFalse(args.agent)
+        self.assertEqual(args.func, forcefocus_cli.cmd_perma_block)
+
+        # 2. perma-block add multiple domains
+        args = self.parser.parse_args(["perma-block", "add", "google.com", "facebook.com"])
+        self.assertEqual(args.command, "perma-block")
+        self.assertEqual(args.action, "add")
+        self.assertEqual(args.domains, ["google.com", "facebook.com"])
+
+        # 3. perma-block unblock with --key and --agent
+        args = self.parser.parse_args(["perma-block", "unblock", "google.com", "-k", "secret", "--agent"])
+        self.assertEqual(args.command, "perma-block")
+        self.assertEqual(args.action, "unblock")
+        self.assertEqual(args.domain, "google.com")
+        self.assertEqual(args.key, "secret")
+        self.assertTrue(args.agent)
+
+        # 4. perma-block cancel
+        args = self.parser.parse_args(["perma-block", "cancel", "google.com"])
+        self.assertEqual(args.command, "perma-block")
+        self.assertEqual(args.action, "cancel")
+        self.assertEqual(args.domain, "google.com")
+
 
 class TestForceFocusCLISetKey(unittest.TestCase):
     @patch("forcefocus_cli.os.geteuid")

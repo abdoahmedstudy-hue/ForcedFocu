@@ -17,11 +17,13 @@ let totalDuration = 0;     // total session duration in seconds
 let sessionType = null;    // "standard" | "pomodoro" | "rescue"
 let pomoPhase = null;      // "focus" | "break"
 let isSessionActive = false;
-let isPermaBocked = false;  // true if domain is in permanent blocklist
+let isPermaBlocked = false;  // true if domain is in permanent blocklist
 let permaHasPending = false; // true if a pending unblock exists
 let permaEndTime = 0;       // Date.now() + pending unblock remaining
 let tickRAF = null;         // requestAnimationFrame ID
-let syncInterval = null;    // periodic re-sync interval
+
+let port = null;
+let soundPlayed = false;
 
 const badge = document.querySelector(".badge");
 const messageEl = document.querySelector(".message");
@@ -30,74 +32,91 @@ const titleEl = document.querySelector("h1");
 
 // ── Daemon Sync ──────────────────────────────────────────────────────────────
 
-async function syncFromDaemon() {
-  try {
-    // Fetch both status and perma blocklist in parallel
-    const [statusRes, permaRes] = await Promise.all([
-      fetch(`${API}/api/status`, { signal: AbortSignal.timeout(3000) }).then(r => r.json()).catch(() => null),
-      fetch(`${API}/api/perma-blocklist`, { signal: AbortSignal.timeout(3000) }).then(r => r.json()).catch(() => null),
-    ]);
+// ── Connection & State Sync ──────────────────────────────────────────────────
 
-    // Check permanent blocklist first
-    const permaDomains = permaRes?.domains || [];
-    const pendingUnlocks = permaRes?.pending_unlocks || {};
+function log(message) {
+  console.log(`[ForcedFocus][Blocked] ${message}`);
+}
 
-    // Check if the current domain (or its parent) is permanently blocked
-    const domainLower = domain.toLowerCase();
-    const isInPerma = permaDomains.some(d => {
-      return domainLower === d || domainLower.endsWith("." + d);
-    });
+function requestSync() {
+  chrome.runtime.sendMessage({ action: "forceSync" }).catch(() => {});
+}
 
-    if (isInPerma) {
-      isPermaBocked = true;
-
-      // Check for pending unblock
-      const matchedPerma = permaDomains.find(d =>
-        domainLower === d || domainLower.endsWith("." + d)
-      );
-      const pending = matchedPerma ? pendingUnlocks[matchedPerma] : null;
-
-      if (pending && pending.remaining_seconds > 0) {
-        permaHasPending = true;
-        permaEndTime = Date.now() + pending.remaining_seconds * 1000;
-        if (!tickRAF) startTick();
-      } else {
-        permaHasPending = false;
-        permaEndTime = 0;
-        showPermaBocked();
-      }
-
-      // If also session-active, perma takes visual priority (more permanent)
-      return;
+function playBlockedSound(settings) {
+  if (soundPlayed) return;
+  const file = settings?.settings?.sound_blocked;
+  if (file) {
+    soundPlayed = true;
+    try {
+      const audio = new Audio(`${API}/sounds/${encodeURIComponent(file)}`);
+      audio.volume = 0.6;
+      audio.play().catch(() => {});
+    } catch (e) {
+      console.warn("Could not play blocked sound:", e);
     }
+  }
+}
 
-    // Not permanently blocked — check session
-    isPermaBocked = false;
+function handleStateUpdate(status, permaBlocklist, settings) {
+  if (settings) {
+    playBlockedSound(settings);
+  }
 
-    if (statusRes && statusRes.active) {
-      isSessionActive = true;
-      sessionType = statusRes.session_type || "standard";
-      pomoPhase = statusRes.pomo_phase || null;
-      totalDuration = statusRes.total_duration_seconds || 0;
+  // Check permanent blocklist first
+  const permaDomains = permaBlocklist?.domains || [];
+  const pendingUnlocks = permaBlocklist?.pending_unlocks || {};
 
-      let remaining;
-      if (sessionType === "pomodoro" && statusRes.pomo_phase_remaining != null) {
-        remaining = statusRes.pomo_phase_remaining;
-      } else {
-        remaining = statusRes.remaining_seconds || 0;
-      }
+  // Check if the current domain (or its parent) is permanently blocked
+  const domainLower = domain.toLowerCase();
+  const isInPerma = permaDomains.some(d => {
+    return domainLower === d || domainLower.endsWith("." + d);
+  });
 
-      endTime = Date.now() + remaining * 1000;
+  if (isInPerma) {
+    isPermaBlocked = true;
+
+    // Check for pending unblock
+    const matchedPerma = permaDomains.find(d =>
+      domainLower === d || domainLower.endsWith("." + d)
+    );
+    const pending = matchedPerma ? pendingUnlocks[matchedPerma] : null;
+
+    if (pending && pending.remaining_seconds > 0) {
+      permaHasPending = true;
+      permaEndTime = Date.now() + pending.remaining_seconds * 1000;
       if (!tickRAF) startTick();
     } else {
-      isSessionActive = false;
-      endTime = 0;
-      showEnded();
+      permaHasPending = false;
+      permaEndTime = 0;
+      showPermaBlocked();
     }
-  } catch (e) {
-    if (endTime === 0 && !isPermaBocked && badge) {
-      badge.textContent = "⚡ Session active — stay focused!";
+
+    // If also session-active, perma takes visual priority (more permanent)
+    return;
+  }
+
+  // Not permanently blocked — check session
+  isPermaBlocked = false;
+
+  if (status && status.active) {
+    isSessionActive = true;
+    sessionType = status.session_type || "standard";
+    pomoPhase = status.pomo_phase || null;
+    totalDuration = status.total_duration_seconds || 0;
+
+    let remaining;
+    if (sessionType === "pomodoro" && status.pomo_phase_remaining != null) {
+      remaining = status.pomo_phase_remaining;
+    } else {
+      remaining = status.remaining_seconds || 0;
     }
+
+    endTime = Date.now() + remaining * 1000;
+    if (!tickRAF) startTick();
+  } else {
+    isSessionActive = false;
+    endTime = 0;
+    showEnded();
   }
 }
 
@@ -110,12 +129,12 @@ function startTick() {
     const now = Date.now();
 
     // Permanent block with pending unblock timer
-    if (isPermaBocked && permaHasPending) {
+    if (isPermaBlocked && permaHasPending) {
       const remMs = permaEndTime - now;
       if (remMs <= 0) {
         // Timer expired — re-sync
         lastDisplayedSecond = -1;
-        syncFromDaemon();
+        requestSync();
         tickRAF = null;
         return;
       }
@@ -133,7 +152,7 @@ function startTick() {
     if (remMs <= 0) {
       if (badge) badge.textContent = "⚡ Syncing...";
       lastDisplayedSecond = -1;
-      syncFromDaemon();
+      requestSync();
       tickRAF = null;
       return;
     }
@@ -175,7 +194,7 @@ function updatePermaDisplay(remSecs) {
   badge.style.boxShadow = "0 0 10px rgba(251, 191, 36, 0.1)";
 }
 
-function showPermaBocked() {
+function showPermaBlocked() {
   if (tickRAF) {
     cancelAnimationFrame(tickRAF);
     tickRAF = null;
@@ -213,10 +232,6 @@ function showEnded() {
     cancelAnimationFrame(tickRAF);
     tickRAF = null;
   }
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
-  }
   if (badge) {
     badge.textContent = "✅ Session ended — you can close this tab";
     badge.style.color = "#22c55e";
@@ -225,28 +240,42 @@ function showEnded() {
   }
 }
 
-// ── Sound ────────────────────────────────────────────────────────────────────
+// ── Init & Connection ────────────────────────────────────────────────────────
 
-(async () => {
-  try {
-    const res = await fetch(`${API}/api/settings`);
-    const data = await res.json();
-    const file = data?.settings?.sound_blocked;
-    if (file) {
-      const audio = new Audio(`${API}/sounds/${encodeURIComponent(file)}`);
-      audio.volume = 0.6;
-      audio.play().catch(() => {});
+function connectToBackground() {
+  port = chrome.runtime.connect({ name: "blocked-tab" });
+
+  port.onMessage.addListener((msg) => {
+    if (msg.action === "stateUpdated") {
+      handleStateUpdate(msg.status, msg.permaBlocklist, msg.settings);
     }
-  } catch (e) {
-    // Daemon unreachable — skip sound silently
+  });
+
+  port.onDisconnect.addListener(() => {
+    log("Disconnected from background. Reconnecting...");
+    port = null;
+    // SW 5-Minute Rule: reconnection loop
+    setTimeout(connectToBackground, 1000);
+  });
+}
+
+// Establish port connection
+connectToBackground();
+
+// Query initial state via getBlockState runtime message
+chrome.runtime.sendMessage({ action: "getBlockState" }, (response) => {
+  if (chrome.runtime.lastError) {
+    // Service Worker might be starting up, trigger a sync fallback
+    requestSync();
+    return;
   }
-})();
-
-// ── Init ─────────────────────────────────────────────────────────────────────
-
-syncFromDaemon();
-syncInterval = setInterval(syncFromDaemon, 10000);
+  if (response) {
+    handleStateUpdate(response.status, response.permaBlocklist, response.settings);
+  }
+});
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) syncFromDaemon();
+  if (!document.hidden) {
+    requestSync();
+  }
 });
