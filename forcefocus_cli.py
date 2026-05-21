@@ -239,15 +239,37 @@ def cmd_schedule(args):
         table.add_column("Days", style="info")
         table.add_column("Time", justify="right")
         table.add_column("Duration")
+        table.add_column("Mode")
+        table.add_column("Type")
+        table.add_column("Details")
+        table.add_column("Groups")
         
         days_arr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         for sch in recurring:
             days_str = ", ".join([days_arr[d] for d in sch.get("days_of_week", [])])
+            
+            mode_str = sch.get("mode", "blacklist")
+            session_type = sch.get("session_type", "standard")
+            
+            details_str = "-"
+            if session_type == "pomodoro":
+                focus = sch.get("focus_minutes", 25)
+                brk = sch.get("break_minutes", 5)
+                cycles = sch.get("cycles", 4)
+                details_str = f"focus:{focus}m, break:{brk}m, cycles:{cycles}"
+                
+            groups = sch.get("groups", [])
+            groups_str = ", ".join(groups) if groups else "-"
+            
             table.add_row(
                 sch.get("id", "")[:8],
                 days_str,
                 str(sch.get("start_time", "")),
-                f"{sch.get('duration_minutes', 0)}m"
+                f"{sch.get('duration_minutes', 0)}m",
+                mode_str,
+                session_type,
+                details_str,
+                groups_str
             )
         console.print(table)
         
@@ -259,6 +281,7 @@ def cmd_schedule(args):
         time_str = args.time
         dur = args.duration
         mode = args.mode
+        session_type = args.session_type
         
         if not days or not time_str:
             out.print_error("Must provide --days and --time", code="USAGE_ERROR")
@@ -269,14 +292,27 @@ def cmd_schedule(args):
             out.print_error("Invalid days format. Use comma-separated ints 0-6", code="USAGE_ERROR")
             return
             
+        if session_type == "pomodoro":
+            dur = (args.focus + args.break_time) * args.cycles
+            
+        if dur <= 0:
+            out.print_error("Duration must be a positive number of minutes.", code="INVALID_DURATION")
+            return
+            
         payload = {
             "action": "add_recurring_schedule",
             "days_of_week": days_list,
             "start_time": time_str,
             "duration_minutes": dur,
             "mode": mode,
-            "session_type": "standard"
+            "session_type": session_type,
+            "groups": args.groups or []
         }
+        
+        if session_type == "pomodoro":
+            payload["focus_minutes"] = args.focus
+            payload["break_minutes"] = args.break_time
+            payload["cycles"] = args.cycles
         
         resp = send_command(payload)
         out.print_data(resp, title="Add Recurring Schedule")
@@ -810,6 +846,21 @@ def build_parser():
     p_sched_add.add_argument("--time", help="Start time HH:MM")
     p_sched_add.add_argument("--duration", type=int, default=120, help="Duration in minutes")
     p_sched_add.add_argument("--mode", default="blacklist", help="Mode")
+    p_sched_add.add_argument(
+        "--type",
+        dest="session_type",
+        choices=["standard", "pomodoro"],
+        default="standard",
+        help="Session type",
+    )
+    p_sched_add.add_argument("--focus", type=int, default=25, help="Pomodoro focus minutes")
+    p_sched_add.add_argument(
+        "--break", dest="break_time", type=int, default=5, help="Pomodoro break minutes"
+    )
+    p_sched_add.add_argument("--cycles", type=int, default=4, help="Pomodoro cycle count")
+    p_sched_add.add_argument(
+        "--groups", "-g", nargs="+", help="Groups to include in the session"
+    )
     
     p_sched_rm = sub_sched.add_parser("remove", help="Remove schedule")
     p_sched_rm.add_argument("id", help="Schedule ID")

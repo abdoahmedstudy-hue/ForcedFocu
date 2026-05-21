@@ -1910,6 +1910,7 @@ class ForcedFocusDaemon:
                 ),
                 "session_type": self.session_type,
                 "schedules": schedules_res,
+                "recurring_schedules": self.recurring_schedules,
                 "intent": self.intent,
                 "intent_tasks": getattr(self, "intent_tasks", []),
             }
@@ -3033,10 +3034,10 @@ class ForcedFocusDaemon:
             now_mono = get_continuous_time()
             now = datetime.now()
 
-            # 1. Evaluate recurring schedules every ~60 seconds
+            # 1. Evaluate recurring schedules every ~10 seconds (to avoid missing minute boundaries due to tick alignment/sleep)
             is_recurring_trigger = False
             if self.recurring_schedules:
-                if now_mono - self._mono_last_recurring_check >= 60.0:
+                if now_mono - self._mono_last_recurring_check >= 10.0:
                     self._mono_last_recurring_check = now_mono
                     current_day = now.weekday()
                     current_time = now.strftime("%H:%M")

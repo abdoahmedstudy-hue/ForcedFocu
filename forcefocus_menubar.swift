@@ -162,8 +162,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
     }
     
     func updateStatusDisplay(_ json: [String: Any]) {
+        func setTitle(_ newTitle: String) {
+            if statusItem.button?.title != newTitle {
+                statusItem.button?.title = newTitle
+            }
+        }
+
         guard let active = json["active"] as? Bool else {
-            statusItem.button?.title = "⚡ FF"
+            setTitle("⚡ FF")
             return
         }
         
@@ -173,7 +179,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
             let mode = json["mode"] as? String ?? "blacklist"
             
             if sessionType == "rescue" {
-                statusItem.button?.title = "🛡️ RESCUE"
+                setTitle("🛡️ RESCUE")
                 return
             }
             
@@ -184,13 +190,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
             
             let h = rem / 3600
             let m = (rem % 3600) / 60
-            let s = rem % 60
             var timeStr = ""
             
+            // To prevent the menu bar from visually ticking every single second (which is distracting),
+            // we only show hours and minutes. We show seconds only if under 1 minute.
             if h > 0 {
-                timeStr = String(format: "%d:%02d:%02d", h, m, s)
+                timeStr = String(format: "%dh %02dm", h, m)
+            } else if m > 0 {
+                timeStr = String(format: "%dm", m)
             } else {
-                timeStr = String(format: "%02d:%02d", m, s)
+                let s = rem % 60
+                timeStr = String(format: "%ds", s)
             }
             
             let icon: String
@@ -204,9 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
                 icon = "🚫"
             }
             
-            statusItem.button?.title = "\(icon) \(timeStr)"
+            setTitle("\(icon) \(timeStr)")
         } else {
-            statusItem.button?.title = "⚡ FF"
+            setTitle("⚡ FF")
         }
     }
     

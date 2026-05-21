@@ -27,6 +27,16 @@ let lastActiveState = false;
 let sessionSnapshot = { intent: "", tasks: [] };
 let _cachedRecurring = []; // Optimistic local cache for instant UI updates
 
+let pickerState = {
+  targetInput: null,
+  selectedDate: null,
+  viewedDate: null,
+  pickerType: 'datetime',
+  hour: 12,
+  minute: 0
+};
+
+
 // ── HTML Sanitization ────────────────────────────────────────────────────────
 
 
@@ -438,9 +448,14 @@ function setActiveUI(status) {
     }
   }
 
-  // Update Recurring Schedules List
-  _cachedRecurring = status.recurring_schedules || [];
-  renderRecurringList(_cachedRecurring);
+  // Update Recurring Schedules List (avoid DOM thrash if unchanged)
+  const recurringSchedules = status.recurring_schedules || [];
+  const recurringJSON = JSON.stringify(recurringSchedules);
+  if (recurringJSON !== _lastRecurringJSON) {
+    _lastRecurringJSON = recurringJSON;
+    _cachedRecurring = recurringSchedules;
+    renderRecurringList(_cachedRecurring);
+  }
 
   // ── 4. Main Timer Logic ──
   if (isFullyActive) {
@@ -560,12 +575,10 @@ function renderRecurringList(recurring) {
   els.recurringSchedulesList.innerHTML = "";
 
   if (recurring.length === 0) {
-    const li = document.createElement("li");
-    li.className = "empty-list";
-    li.textContent = "No recurring rules configured";
-    els.recurringSchedulesList.appendChild(li);
+    if (els.recurringSchedulesCard) els.recurringSchedulesCard.classList.remove("hidden");
     return;
   }
+  if (els.recurringSchedulesCard) els.recurringSchedulesCard.classList.remove("hidden");
 
   // Display order: Sat(5), Sun(6), Mon(0), Tue(1), Wed(2), Thu(3), Fri(4)
   const dayOrder = [5, 6, 0, 1, 2, 3, 4];
@@ -600,8 +613,18 @@ function renderRecurringList(recurring) {
     const calMeta = document.createElement("div");
     calMeta.className = "cal-duration";
     const modeLabel = (sch.mode === "whitelist") ? "🛡️ Whitelist" : "🚫 Blacklist";
-    const typeLabel = (sch.session_type === "pomodoro") ? " · 🍅 Pomodoro" : "";
-    calMeta.textContent = `⏳ ${sch.duration_minutes || 0}m · ${modeLabel}${typeLabel}`;
+    let typeLabel = "";
+    if (sch.session_type === "pomodoro") {
+      const focus = sch.focus_minutes || 25;
+      const breakMin = sch.break_minutes || 5;
+      const cycles = sch.cycles || 4;
+      typeLabel = ` · 🍅 Pomodoro (${focus}m/${breakMin}m × ${cycles})`;
+    }
+    let groupsLabel = "";
+    if (sch.groups && sch.groups.length > 0) {
+      groupsLabel = ` · 🏷️ ${sch.groups.join(", ")}`;
+    }
+    calMeta.textContent = `⏳ ${sch.duration_minutes || 0}m · ${modeLabel}${typeLabel}${groupsLabel}`;
 
     calDetails.appendChild(calTime);
     calDetails.appendChild(calTitle);
@@ -629,6 +652,7 @@ function renderRecurringList(recurring) {
 let _lastPomoPhase = null;
 let _lastActiveState = null;
 let _lastScheduleJSON = ""; // P2: Track schedule data to avoid DOM thrash
+let _lastRecurringJSON = "";
 
 async function refreshStatus() {
   const data = await api("GET", "/api/status");
@@ -1236,7 +1260,7 @@ function initEvents() {
       if (scheduleType === "in") {
         payload.schedule_in = parseInt(els.scheduleIn.value);
       } else if (scheduleType === "at") {
-        payload.schedule_at = els.scheduleAt.value;
+        payload.schedule_at = els.scheduleAt.dataset.value || els.scheduleAt.value;
       }
 
       const originalBtnHTML = els.btnStart.innerHTML;
@@ -1291,7 +1315,7 @@ function initEvents() {
         showToast("Please select at least one day.");
         return;
       }
-      const time = els.recurringTime.value;
+      const time = els.recurringTime.dataset.value || els.recurringTime.value;
       if (!time) {
         showToast("Please select a time.");
         return;
@@ -1332,11 +1356,13 @@ function initEvents() {
           // Optimistic: immediately render the new rule
           if (res.rule) {
             _cachedRecurring.push(res.rule);
+            _lastRecurringJSON = JSON.stringify(_cachedRecurring);
             renderRecurringList(_cachedRecurring);
           }
           selectedRecurringDays = [];
           els.recurringDays.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
           els.recurringTime.value = "";
+          delete els.recurringTime.dataset.value;
         } else {
           showToast(`Error: ${res.message || "Failed to add"}`);
         }
@@ -1352,6 +1378,7 @@ function initEvents() {
   window.removeRecurringSchedule = async function(id) {
     // Optimistic: immediately remove from DOM
     _cachedRecurring = _cachedRecurring.filter(r => r.id !== id);
+    _lastRecurringJSON = JSON.stringify(_cachedRecurring);
     renderRecurringList(_cachedRecurring);
     try {
       const res = await api("DELETE", `/api/schedules/recurring/${id}`);
@@ -1578,6 +1605,7 @@ async function loadApiToken() {
 
 async function init() {
   initEvents();
+  initPickerEvents();
   await loadApiToken();
   await refreshStatus();
   await refreshLists();
@@ -1697,7 +1725,330 @@ function renderSessionGroups() {
   }
 }
 
+// ── Custom Datetime & Time Picker Functions ───────────────────────────────────
+
+function formatDateTimeDisplay(date) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const m = months[date.getMonth()];
+  const d = date.getDate();
+  const y = date.getFullYear();
+  let hrs = date.getHours();
+  const mins = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hrs >= 12 ? "PM" : "AM";
+  hrs = hrs % 12;
+  hrs = hrs ? hrs : 12;
+  return `${m} ${d}, ${y} at ${hrs}:${mins} ${ampm}`;
+}
+
+function formatDateTimeMachine(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatTimeDisplay(hrs, mins) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const ampm = hrs >= 12 ? "PM" : "AM";
+  let h = hrs % 12;
+  h = h ? h : 12;
+  return `${h}:${pad(mins)} ${ampm}`;
+}
+
+function formatTimeMachine(hrs, mins) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(hrs)}:${pad(mins)}`;
+}
+
+function closePicker() {
+  const modal = document.getElementById("datetimePickerModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function savePicker() {
+  if (pickerState.pickerType === 'datetime') {
+    if (!pickerState.selectedDate) {
+      showToast("Please select a date.");
+      return;
+    }
+    pickerState.selectedDate.setHours(pickerState.hour);
+    pickerState.selectedDate.setMinutes(pickerState.minute);
+    
+    const now = new Date();
+    if (pickerState.selectedDate <= now) {
+      showToast("Please select a date and time in the future.");
+      return;
+    }
+    
+    pickerState.targetInput.value = formatDateTimeDisplay(pickerState.selectedDate);
+    pickerState.targetInput.dataset.value = formatDateTimeMachine(pickerState.selectedDate);
+  } else {
+    pickerState.targetInput.value = formatTimeDisplay(pickerState.hour, pickerState.minute);
+    pickerState.targetInput.dataset.value = formatTimeMachine(pickerState.hour, pickerState.minute);
+  }
+  closePicker();
+}
+
+function updatePickerPreview() {
+  const preview = document.getElementById("pickerPreview");
+  const hourInput = document.getElementById("pickerHour");
+  const minuteInput = document.getElementById("pickerMinute");
+  
+  if (hourInput) hourInput.value = String(pickerState.hour).padStart(2, "0");
+  if (minuteInput) minuteInput.value = String(pickerState.minute).padStart(2, "0");
+  
+  if (!preview) return;
+  
+  if (pickerState.pickerType === 'datetime') {
+    if (pickerState.selectedDate) {
+      pickerState.selectedDate.setHours(pickerState.hour);
+      pickerState.selectedDate.setMinutes(pickerState.minute);
+      preview.textContent = formatDateTimeDisplay(pickerState.selectedDate);
+    } else {
+      preview.textContent = "Select a date";
+    }
+  } else {
+    preview.textContent = formatTimeDisplay(pickerState.hour, pickerState.minute);
+  }
+}
+
+function renderCalendar() {
+  const grid = document.getElementById("calendarDaysGrid");
+  const monthYearLabel = document.getElementById("currentMonthYear");
+  if (!grid || !monthYearLabel) return;
+  
+  grid.innerHTML = "";
+  
+  const year = pickerState.viewedDate.getFullYear();
+  const month = pickerState.viewedDate.getMonth();
+  
+  const firstDay = new Date(year, month, 1);
+  const startDayOfWeek = firstDay.getDay();
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  const prevMonthTotalDays = new Date(year, month, 0).getDate();
+  
+  for (let i = startDayOfWeek - 1; i >= 0; i--) {
+    const dayNum = prevMonthTotalDays - i;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "calendar-day prev-month-day disabled";
+    btn.disabled = true;
+    btn.textContent = dayNum;
+    grid.appendChild(btn);
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  for (let dayNum = 1; dayNum <= totalDays; dayNum++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "calendar-day";
+    btn.textContent = dayNum;
+    
+    const thisDate = new Date(year, month, dayNum);
+    if (pickerState.pickerType === 'datetime') {
+      if (thisDate < today) {
+        btn.classList.add("disabled");
+        btn.disabled = true;
+      }
+    }
+    
+    if (pickerState.selectedDate &&
+        pickerState.selectedDate.getDate() === dayNum &&
+        pickerState.selectedDate.getMonth() === month &&
+        pickerState.selectedDate.getFullYear() === year) {
+      btn.classList.add("selected");
+    }
+    
+    btn.addEventListener("click", () => {
+      pickerState.selectedDate = new Date(year, month, dayNum, pickerState.hour, pickerState.minute);
+      updatePickerPreview();
+      renderCalendar();
+    });
+    
+    grid.appendChild(btn);
+  }
+  
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  monthYearLabel.textContent = `${months[month]} ${year}`;
+}
+
+function openPicker(inputEl, type) {
+  pickerState.targetInput = inputEl;
+  pickerState.pickerType = type;
+  
+  const modal = document.getElementById("datetimePickerModal");
+  const title = document.getElementById("pickerTitle");
+  const dateSection = document.getElementById("pickerDateSection");
+  
+  if (!modal) return;
+  
+  if (title) {
+    title.textContent = type === 'datetime' ? 'Select Date & Time' : 'Select Time';
+  }
+  
+  if (dateSection) {
+    dateSection.style.display = type === 'datetime' ? 'block' : 'none';
+  }
+  
+  const val = inputEl.dataset.value;
+  let initialDate = new Date();
+  
+  if (type === 'datetime') {
+    let parsed = null;
+    if (val) {
+      const parts = val.split('T');
+      if (parts.length === 2) {
+        const dateParts = parts[0].split('-');
+        const timeParts = parts[1].split(':');
+        if (dateParts.length === 3 && timeParts.length === 2) {
+          parsed = new Date(
+            parseInt(dateParts[0]),
+            parseInt(dateParts[1]) - 1,
+            parseInt(dateParts[2]),
+            parseInt(timeParts[0]),
+            parseInt(timeParts[1])
+          );
+        }
+      }
+    }
+    
+    const now = new Date();
+    if (!parsed || parsed <= now) {
+      const d = new Date();
+      d.setMinutes(d.getMinutes() + 5);
+      initialDate = d;
+    } else {
+      initialDate = parsed;
+    }
+    
+    pickerState.selectedDate = initialDate;
+    pickerState.viewedDate = new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
+    pickerState.hour = initialDate.getHours();
+    pickerState.minute = initialDate.getMinutes();
+    
+    renderCalendar();
+  } else {
+    pickerState.selectedDate = null;
+    pickerState.viewedDate = null;
+    
+    if (val) {
+      const parts = val.split(':');
+      if (parts.length === 2) {
+        pickerState.hour = parseInt(parts[0]);
+        pickerState.minute = parseInt(parts[1]);
+      }
+    } else {
+      const now = new Date();
+      pickerState.hour = now.getHours();
+      pickerState.minute = now.getMinutes();
+    }
+  }
+  
+  updatePickerPreview();
+  modal.classList.remove("hidden");
+}
+
+function initPickerEvents() {
+  const scheduleAt = document.getElementById("scheduleAt");
+  const recurringTime = document.getElementById("recurringTime");
+  
+  if (scheduleAt) {
+    scheduleAt.addEventListener("click", () => openPicker(scheduleAt, 'datetime'));
+    scheduleAt.addEventListener("focus", (e) => {
+      e.target.blur();
+      openPicker(scheduleAt, 'datetime');
+    });
+  }
+  
+  if (recurringTime) {
+    recurringTime.addEventListener("click", () => openPicker(recurringTime, 'time'));
+    recurringTime.addEventListener("focus", (e) => {
+      e.target.blur();
+      openPicker(recurringTime, 'time');
+    });
+  }
+  
+  const prevMonthBtn = document.getElementById("prevMonthBtn");
+  const nextMonthBtn = document.getElementById("nextMonthBtn");
+  
+  if (prevMonthBtn) {
+    prevMonthBtn.addEventListener("click", () => {
+      if (pickerState.viewedDate) {
+        const y = pickerState.viewedDate.getFullYear();
+        const m = pickerState.viewedDate.getMonth();
+        pickerState.viewedDate = new Date(y, m - 1, 1);
+        renderCalendar();
+      }
+    });
+  }
+  
+  if (nextMonthBtn) {
+    nextMonthBtn.addEventListener("click", () => {
+      if (pickerState.viewedDate) {
+        const y = pickerState.viewedDate.getFullYear();
+        const m = pickerState.viewedDate.getMonth();
+        pickerState.viewedDate = new Date(y, m + 1, 1);
+        renderCalendar();
+      }
+    });
+  }
+  
+  const hourUpBtn = document.getElementById("hourUpBtn");
+  const hourDownBtn = document.getElementById("hourDownBtn");
+  const minuteUpBtn = document.getElementById("minuteUpBtn");
+  const minuteDownBtn = document.getElementById("minuteDownBtn");
+  
+  if (hourUpBtn) {
+    hourUpBtn.addEventListener("click", () => {
+      pickerState.hour = (pickerState.hour + 1) % 24;
+      updatePickerPreview();
+    });
+  }
+  if (hourDownBtn) {
+    hourDownBtn.addEventListener("click", () => {
+      pickerState.hour = (pickerState.hour - 1 + 24) % 24;
+      updatePickerPreview();
+    });
+  }
+  
+  if (minuteUpBtn) {
+    minuteUpBtn.addEventListener("click", () => {
+      pickerState.minute = (pickerState.minute + 1) % 60;
+      updatePickerPreview();
+    });
+  }
+  if (minuteDownBtn) {
+    minuteDownBtn.addEventListener("click", () => {
+      pickerState.minute = (pickerState.minute - 1 + 60) % 60;
+      updatePickerPreview();
+    });
+  }
+  
+  const cancelPickerBtn = document.getElementById("cancelPickerBtn");
+  const savePickerBtn = document.getElementById("savePickerBtn");
+  const modalOverlay = document.getElementById("datetimePickerModal");
+  
+  if (cancelPickerBtn) {
+    cancelPickerBtn.addEventListener("click", closePicker);
+  }
+  if (savePickerBtn) {
+    savePickerBtn.addEventListener("click", savePicker);
+  }
+  if (modalOverlay) {
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) {
+        closePicker();
+      }
+    });
+  }
+  
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closePicker();
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   init();
-
 });

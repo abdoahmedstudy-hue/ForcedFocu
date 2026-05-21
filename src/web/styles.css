@@ -2,33 +2,7 @@
    ForcedFocus — Dark Glassmorphism UI
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-:root {
-  --bg-primary: #040408;
-  --bg-secondary: #08080f;
-  --bg-card: rgba(12, 12, 25, 0.6);
-  --bg-card-hover: rgba(18, 18, 35, 0.7);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-active: rgba(99, 102, 241, 0.4);
-  --text-primary: #fcfcfd;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-blue: #6366f1;
-  --accent-violet: #a855f7;
-  --accent-gradient: linear-gradient(135deg, #6366f1, #a855f7);
-  --danger: #f43f5e;
-  --danger-glow: rgba(244, 63, 94, 0.3);
-  --success: #10b981;
-  --success-glow: rgba(16, 185, 129, 0.3);
-  --warning: #f59e0b;
-  --radius: 32px;
-  --radius-sm: 24px;
-  --radius-xs: 18px;
-  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --glass: blur(24px) saturate(160%);
-  --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  color-scheme: dark;
-}
+@import "./shared/tokens.css";
 
 * {
   margin: 0;
@@ -804,6 +778,247 @@ body::after {
   color: var(--text-muted);
 }
 
+/* ── Recurring Schedules UI ──────────────────────────────────────────────── */
+
+.day-btn {
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.day-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.day-btn.active {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--border-active);
+  color: var(--accent-blue);
+  font-weight: 600;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
+}
+
+.recurring-input {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  color: var(--text-primary);
+  padding: 8px 16px;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  transition: var(--transition);
+}
+
+.recurring-input:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.recurring-input::placeholder {
+  color: var(--text-muted);
+}
+
+.empty-list {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+ul.recurring-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  margin-bottom: 16px;
+}
+
+.card.recurring-list {
+  background: linear-gradient(145deg,
+      rgba(35, 20, 60, 0.6),
+      rgba(15, 10, 30, 0.8));
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.05),
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(139, 92, 246, 0.05);
+}
+
+.card.recurring-list:hover {
+  border-color: rgba(139, 92, 246, 0.35);
+  box-shadow:
+    0 25px 60px rgba(0, 0, 0, 0.6),
+    0 0 40px rgba(139, 92, 246, 0.15);
+}
+
+.card.recurring-list .list-header {
+  margin-bottom: 12px;
+}
+
+.card.recurring-list .card-title {
+  margin-bottom: 0;
+  color: #c084fc;
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+}
+
+.card.recurring-list .list-count {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.1);
+}
+
+.card.recurring-list .add-rule-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.card.recurring-list .add-rule-section h3 {
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+}
+
+.card.recurring-list .add-rule-section p {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.card.recurring-list .days-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.card.recurring-list .day-btn {
+  border-color: rgba(139, 92, 246, 0.15);
+}
+
+.card.recurring-list .day-btn:hover {
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.35);
+}
+
+.card.recurring-list .day-btn.active {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #c084fc;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.25);
+}
+
+.card.recurring-list .time-container {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.card.recurring-list .recurring-input {
+  flex: 1;
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+.card.recurring-list .recurring-input:focus {
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+}
+
+.card.recurring-list .btn-add {
+  width: 100%;
+  height: auto;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  border: none;
+  border-radius: 100px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+}
+
+.card.recurring-list .btn-add:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 20px rgba(168, 85, 247, 0.4),
+    0 0 15px rgba(99, 102, 241, 0.2);
+}
+
+.card.recurring-list .cal-date {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.recurring-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  transition: var(--transition);
+  animation: fadeIn 0.25s ease;
+}
+
+.recurring-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.recurring-item .cal-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.recurring-remove {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 100px;
+  transition: var(--transition);
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.recurring-item:hover .recurring-remove {
+  opacity: 1;
+}
+
+.recurring-remove:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
 /* ── Custom Checkbox ─────────────────────────────────────────────────────── */
 
 .custom-checkbox {
@@ -1101,14 +1316,16 @@ body::after {
 
 /* ── Permanent Block Card ────────────────────────────────────────────────── */
 
-.perma-block-card {
-  background: linear-gradient(145deg,
-      rgba(40, 15, 20, 0.6),
-      rgba(20, 5, 10, 0.8));
+.card.list-card.perma-block-card {
+  background: linear-gradient(145deg, rgb(45 12 13 / 60%), rgb(30 10 10 / 80%));
   border: 1px solid rgba(239, 68, 68, 0.2);
   box-shadow:
     inset 0 1px 1px rgba(239, 68, 68, 0.05),
     0 8px 32px rgba(239, 68, 68, 0.08);
+}
+
+.card.list-card.perma-block-card:hover {
+  background: linear-gradient(145deg, rgb(60 17 18 / 65%), rgb(40 14 14 / 85%));
 }
 
 .perma-block-card .card-title {
@@ -2225,4 +2442,181 @@ body::after {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ── Custom Card Gradients ────────────────────────────────────────────────── */
+
+#scheduleCard,
+#modeCard,
+#sessionSettingsCard,
+.card.list-card {
+  background: linear-gradient(145deg, rgb(19 11 31 / 60%), rgba(15, 10, 30, 0.8));
+}
+
+#scheduleCard:hover,
+#modeCard:hover,
+#sessionSettingsCard:hover,
+.card.list-card:hover {
+  background: linear-gradient(145deg, rgb(29 17 47 / 65%), rgba(22, 15, 43, 0.85));
+}
+
+.card.list-card.blacklist-card,
+#rescueCard {
+  background: linear-gradient(145deg, rgba(40, 15, 20, 0.6), rgba(20, 5, 10, 0.8));
+}
+
+.card.list-card.blacklist-card:hover,
+#rescueCard:hover {
+  background: linear-gradient(145deg, rgba(55, 20, 27, 0.65), rgba(30, 7, 15, 0.85));
+}
+
+.card.list-card.whitelist-card {
+  background: linear-gradient(145deg, rgb(21 72 28 / 60%), rgb(5 20 8 / 80%));
+}
+
+.card.list-card.whitelist-card:hover {
+  background: linear-gradient(145deg, rgb(28 96 37 / 65%), rgb(8 30 12 / 85%));
+}
+
+/* ── Custom Datetime & Time Picker ────────────────────────────────────────── */
+
+/* Inputs styling with calendar/clock icons */
+.datetime-picker-trigger,
+.time-picker-trigger {
+  cursor: pointer;
+  background-repeat: no-repeat !important;
+  background-position: right 14px center !important;
+  background-size: 16px 16px !important;
+  padding-right: 40px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.datetime-picker-trigger {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' /%3E%3C/svg%3E") !important;
+}
+
+.datetime-picker-trigger:hover,
+.datetime-picker-trigger:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a855f7'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' /%3E%3C/svg%3E") !important;
+}
+
+.time-picker-trigger {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' /%3E%3C/svg%3E") !important;
+}
+
+.time-picker-trigger:hover,
+.time-picker-trigger:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a855f7'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' /%3E%3C/svg%3E") !important;
+}
+
+/* Modal styling overrides */
+.datetime-picker-modal {
+  border: 1px solid var(--border) !important;
+  background: linear-gradient(135deg, rgba(20, 16, 35, 0.75), rgba(12, 10, 20, 0.9)) !important;
+  box-shadow: var(--shadow-lg), 0 0 40px rgba(168, 85, 247, 0.15) !important;
+  backdrop-filter: var(--glass) !important;
+  -webkit-backdrop-filter: var(--glass) !important;
+}
+
+/* Calendar Month Nav Buttons */
+.btn-cal-nav {
+  transition: var(--transition);
+}
+
+.btn-cal-nav:hover:not(:disabled) {
+  background: rgba(168, 85, 247, 0.15) !important;
+  border-color: var(--border-active) !important;
+  color: #c084fc !important;
+  transform: translateY(-1px);
+}
+
+.btn-cal-nav:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-cal-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Calendar Days */
+.calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  outline: none;
+}
+
+.calendar-day:hover:not(.disabled):not(.selected) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.calendar-day.selected {
+  background: var(--accent-gradient) !important;
+  color: white !important;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
+  border-color: transparent !important;
+}
+
+.calendar-day.prev-month-day {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.calendar-day.disabled {
+  color: var(--text-muted);
+  opacity: 0.25;
+  cursor: not-allowed;
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Time Spinner controls */
+.time-spinner-btn {
+  user-select: none;
+}
+
+.time-spinner-btn:hover {
+  color: #c084fc !important;
+  transform: scale(1.2);
+}
+
+.time-spinner-btn:active {
+  transform: scale(0.9);
+}
+
+/* Hide webkit spinner arrows for the number inputs */
+.time-number-input::-webkit-outer-spin-button,
+.time-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.time-number-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.time-number-input:focus {
+  border-color: var(--border-active) !important;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.2) !important;
+  background: rgba(255,255,255,0.06) !important;
 }

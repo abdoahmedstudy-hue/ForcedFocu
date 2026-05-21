@@ -289,11 +289,12 @@ class TestForcedFocusDaemon(unittest.TestCase):
     @patch("forcefocus_daemon.ForcedFocusDaemon._atomic_write_json")
     def test_persist_session_lock_success(self, mock_atomic_write):
         self.daemon.schedules = []
+        self.daemon.recurring_schedules = []
         self.daemon.active = False
         self.daemon._persist_session_lock()
         mock_atomic_write.assert_called_once()
         written_data = mock_atomic_write.call_args[0][1]
-        self.assertEqual(written_data, {"schedules": []})
+        self.assertEqual(written_data, {"schedules": [], "recurring_schedules": []})
 
     @patch("forcefocus_daemon.logging.error")
     @patch(
