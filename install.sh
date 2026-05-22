@@ -61,12 +61,17 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Verify source files
+CLI_DIR_SRC="${SCRIPT_DIR}/cli"
 for f in "$DAEMON_SRC" "$CLI_SRC" "$WEB_SRC" "$PLIST_SRC"; do
     if [[ ! -f "$f" ]]; then
         echo -e "${RED}${BOLD} ✗ Missing Source${NC}: ${f}"
         exit 1
     fi
 done
+if [[ ! -d "$CLI_DIR_SRC" ]]; then
+    echo -e "${RED}${BOLD} ✗ Missing CLI directory${NC}: ${CLI_DIR_SRC}"
+    exit 1
+fi
 
 # Check for Python 3
 PYTHON_BIN=""
@@ -111,7 +116,18 @@ cp "$DAEMON_SRC" "$DAEMON_DST"
 chmod 700 "$DAEMON_DST"
 chown root:wheel "$DAEMON_DST"
 
-cp "$CLI_SRC" "$CLI_DST"
+CLI_LIB_DST="/usr/local/lib/forcefocus"
+rm -rf "$CLI_LIB_DST"
+mkdir -p "$CLI_LIB_DST"
+cp -R "${CLI_DIR_SRC}" "$CLI_LIB_DST/"
+cp "$CLI_SRC" "$CLI_LIB_DST/"
+chmod -R 755 "$CLI_LIB_DST"
+chown -R root:wheel "$CLI_LIB_DST"
+
+cat << EOF > "$CLI_DST"
+#!/bin/bash
+exec ${PYTHON_BIN} -c "import sys; sys.path.insert(0, '/usr/local/lib/forcefocus'); from cli.main import main; main()" "\$@"
+EOF
 chmod 755 "$CLI_DST"
 chown root:wheel "$CLI_DST"
 

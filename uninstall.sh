@@ -165,6 +165,12 @@ for f in "$DAEMON_DST" "$CLI_DST" "$WEB_DST" "$PLIST_DST" "$SOCK_PATH"; do
     fi
 done
 
+CLI_LIB_DST="/usr/local/lib/forcefocus"
+if [[ -d "$CLI_LIB_DST" ]]; then
+    rm -rf "$CLI_LIB_DST"
+    echo -e "    Removed: ${CLI_LIB_DST}"
+fi
+
 if [[ -d "$WEB_DIR_DST" ]]; then
     rm -rf "$WEB_DIR_DST"
     echo -e "    Removed: ${WEB_DIR_DST}"

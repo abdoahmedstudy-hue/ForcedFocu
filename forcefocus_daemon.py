@@ -3486,8 +3486,17 @@ class ForcedFocusDaemon:
             return self._cmd_add_recurring_schedule(cmd)
         elif action == "remove_recurring_schedule":
             return self._cmd_remove_recurring_schedule(cmd)
+        elif action == "get_settings":
+            return self._cmd_get_settings()
+        elif action == "save_settings":
+            return self._cmd_save_settings(cmd)
+        elif action == "get_sounds":
+            return self._cmd_get_sounds()
+        elif action == "delete_sound":
+            return self._cmd_delete_sound(cmd)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
+
 
     def _http_server(self):
         try:
