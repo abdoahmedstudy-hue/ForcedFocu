@@ -51,7 +51,7 @@ def build_parser():
         "--version",
         "-v",
         action="version",
-        version="ForcedFocus CLI v3.0.0 (Rich Edition)",
+        version="ForcedFocus CLI v3.1.0 (Rich Edition)",
     )
 
     sub = parser.add_subparsers(dest="command", help="Available commands")

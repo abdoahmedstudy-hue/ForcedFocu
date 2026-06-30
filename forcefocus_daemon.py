@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ForcedFocus Daemon v3 — Root-level macOS website blocker.
+ForcedFocus Daemon v3.1 — Root-level macOS website blocker.
 
 Supports blacklist mode (block listed sites) and whitelist mode
 (allow ONLY listed sites by redirecting DNS + pinning IPs).
@@ -1030,6 +1030,8 @@ class ForcedFocusDaemon:
         self._net_services_cache_time: float = 0.0
         self._cached_history: list | None = None
         self._cached_history_mtime: float = 0.0
+        self._cached_history_mtime: float = 0.0
+        self._wd_firewall_counter: int = 0
         self.prayer_manager = None
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -1054,7 +1056,7 @@ class ForcedFocusDaemon:
 
     def run(self):
         setup_logging()
-        logging.info("ForcedFocus daemon v3 starting (PID %d).", os.getpid())
+        logging.info("ForcedFocus daemon v3.1 starting (PID %d).", os.getpid())
         self._ensure_config_dir()
         self._ensure_lists_file()
         self._ensure_groups_file()
@@ -1153,12 +1155,12 @@ class ForcedFocusDaemon:
     # ── Lists Management ──────────────────────────────────────────────────────
 
     def _load_lists(self) -> dict:
-        try:
-            mtime = LISTS_FILE.stat().st_mtime
-        except FileNotFoundError:
-            return {"blacklist": [], "whitelist": []}
-
         with self.lock:
+            try:
+                mtime = LISTS_FILE.stat().st_mtime
+            except FileNotFoundError:
+                return {"blacklist": [], "whitelist": []}
+
             if self._cached_lists is not None and mtime == self._cached_lists_mtime:
                 return {
                     k: list(v) if isinstance(v, list) else v
@@ -1196,15 +1198,19 @@ class ForcedFocusDaemon:
                     for k, v in self._cached_groups.items()
                 }
 
-            try:
-                self._cached_groups = json.loads(GROUPS_FILE.read_text())
-                self._cached_groups_mtime = mtime
-                return {
-                    k: v.copy() if isinstance(v, list) else v
-                    for k, v in self._cached_groups.items()
-                }
-            except Exception:
-                return {}
+        try:
+            raw = GROUPS_FILE.read_text()
+            parsed = json.loads(raw)
+        except Exception:
+            return {}
+
+        with self.lock:
+            self._cached_groups = parsed
+            self._cached_groups_mtime = mtime
+            return {
+                k: v.copy() if isinstance(v, list) else v
+                for k, v in self._cached_groups.items()
+            }
 
     def _save_groups(self, groups: dict):
         self._atomic_write_json(GROUPS_FILE, groups, indent=2)
@@ -2016,7 +2022,6 @@ class ForcedFocusDaemon:
 
         self.mode = data.get("mode", "blacklist")
         self.session_expiry = expiry
-        self.remaining_seconds = remaining
         self.session_type = data.get("session_type", "standard")
         self.intent = data.get("intent", None)
         self.intent_tasks = data.get("intent_tasks", [])
@@ -2041,10 +2046,8 @@ class ForcedFocusDaemon:
                 self._cleanup_session()
                 return
             self._mono_unlock_end = now_mono + unlock_remaining
-            self.pending_unlock_seconds = unlock_remaining
         else:
             self.pending_unlock_at = None
-            self.pending_unlock_seconds = 0
             self._mono_unlock_end = 0.0
 
         if data.get("pomo_phase_expiry"):
@@ -3739,8 +3742,11 @@ class ForcedFocusDaemon:
 
     def _transition_pomodoro_phase(self):
         now = datetime.now()
-        session_started = self.session_expiry - timedelta(seconds=self.total_duration_seconds)
-        phase_started = session_started + timedelta(seconds=getattr(self, "pomo_phases_tracked_seconds", 0))
+        
+        if self.pomo_phase == "focus":
+            phase_started = now - timedelta(minutes=self.pomo_focus_minutes)
+        else:
+            phase_started = now - timedelta(minutes=self.pomo_break_minutes)
 
         if self.pomo_phase == "focus":
             self._record_pomodoro_phase("focus", self.pomo_focus_minutes, phase_started, now, True)
@@ -5010,7 +5016,9 @@ class ForcedFocusDaemon:
                     logging.error("Watchdog hosts error: %s", exc)
 
             # Integrity check: Firewall (QUIC block) every ~30s (was 5s) to reduce CPU
-            if self._wd_persist_counter % 120 == 0:
+            self._wd_firewall_counter += 1
+            if self._wd_firewall_counter >= 120:
+                self._wd_firewall_counter = 0
                 try:
                     res = subprocess.run(
                         ["pfctl", "-a", "forcefocus", "-s", "rules"],
@@ -5450,19 +5458,13 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
             
             try:
                 while True:
-                    status_data = daemon._get_status()
-                    body = json.dumps(status_data)
                     now = time.time()
+                    force_update = False
                     
-                    if body != last_written_body or now - last_written_time >= 10.0:
-                        self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                        last_written_body = body
-                        last_written_time = now
-                        
                     timeout = 0.5 if daemon.active else 5.0
                     try:
                         q.get(timeout=timeout)
+                        force_update = True
                         while not q.empty():
                             try:
                                 q.get_nowait()
@@ -5470,6 +5472,15 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
                                 break
                     except queue.Empty:
                         pass
+                        
+                    if force_update or now - last_written_time >= 10.0:
+                        status_data = daemon._get_status()
+                        body = json.dumps(status_data)
+                        if body != last_written_body or now - last_written_time >= 10.0:
+                            self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+                            self.wfile.flush()
+                            last_written_body = body
+                            last_written_time = time.time()
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
                 pass
             finally:
@@ -5554,7 +5565,7 @@ class EmbeddedWebHandler(BaseHTTPRequestHandler):
         elif path == "/api/intent":
             self._send_json(self.server.daemon_ref._set_intent(body))
         elif path == "/api/settings":
-            self._send_json(self.server.daemon_ref._cmd_save_settings(body))
+            self._send_json(self.server.daemon_ref._cmd_save_settings({"settings": body}))
         elif path == "/api/upload-sound":
             self._send_json(self.server.daemon_ref._cmd_upload_sound(body))
         elif path == "/api/delete-sound":

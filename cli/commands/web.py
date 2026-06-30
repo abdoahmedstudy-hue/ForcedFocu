@@ -24,7 +24,10 @@ def cmd_web(args):
         else:
             out.print_error("Web server script not found.", code="FILE_NOT_FOUND")
     elif action == "stop":
-        out.print_data(
-            {"status": "ok", "message": "Stopping web interface..."}, title="Web UI"
-        )
-        # In a real implementation, we would find and kill the process.
+        try:
+            subprocess.run(["pkill", "-f", "forcefocus_web.py"], check=True)
+            out.print_data(
+                {"status": "ok", "message": "Stopped web interface."}, title="Web UI"
+            )
+        except subprocess.CalledProcessError:
+            out.print_error("Web interface is not running or could not be stopped.", code="STOP_FAILED")

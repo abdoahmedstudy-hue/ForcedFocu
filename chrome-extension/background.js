@@ -69,7 +69,7 @@ async function loadApiToken() {
       signal: AbortSignal.timeout(2000),
     });
     const html = await res.text();
-    const match = html.match(/window\.apiToken\s*=\s*["']([^"']+)["']/);
+    const match = html.match(/window\.apiToken\s*=\s*"([^"]+)"/);
     if (match && match[1]) {
       apiToken = match[1];
     }
