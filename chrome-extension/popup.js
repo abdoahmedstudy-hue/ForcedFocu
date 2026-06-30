@@ -9,7 +9,7 @@ import { renderIntentTasks } from "./shared/intent-tasks.js";
 const API = "http://127.0.0.1:7070";
 let mode = "blacklist";
 let duration = 120;
-let countdown = null;
+let animationFrameId = null;
 let totalSecs = 0;
 let currentRemaining = 0; // P1: Track for drift guard
 
@@ -46,12 +46,19 @@ function showError(msg) {
 // ── API (A2: with token auth + 401 auto-retry) ──────────────────────────────
 
 async function loadApiToken() {
+  if (window.apiToken) {
+    apiToken = window.apiToken;
+    return;
+  }
   try {
-    const res = await fetch(API + "/api/token", {
+    const res = await fetch(API + "/", {
       signal: AbortSignal.timeout(2000),
     });
-    const data = await res.json();
-    if (data.token) apiToken = data.token;
+    const html = await res.text();
+    const match = html.match(/window\.apiToken\s*=\s*["']([^"']+)["']/);
+    if (match && match[1]) {
+      apiToken = match[1];
+    }
   } catch (e) {
     console.error("[ForcedFocus] Token load failed:", e);
   }
@@ -59,7 +66,7 @@ async function loadApiToken() {
 
 async function api(method, path, body = null) {
   const headers = { "Content-Type": "application/json" };
-  if (method !== "GET" && apiToken) {
+  if (apiToken) {
     headers["X-API-Token"] = apiToken;
   }
   const opts = {
@@ -72,13 +79,14 @@ async function api(method, path, body = null) {
   try {
     const res = await fetch(API + path, opts);
     // A2: Auto-refresh token on 401 (daemon restarted)
-    if (res.status === 401 && method !== "GET") {
+    if (res.status === 401) {
       await loadApiToken();
-      headers["X-API-Token"] = apiToken;
+      if (apiToken) headers["X-API-Token"] = apiToken;
       const retry = await fetch(API + path, {
         method,
         headers,
         body: opts.body,
+        signal: AbortSignal.timeout(5000), // B3: Prevent indefinite hang on retry
       });
       return await retry.json();
     }
@@ -103,6 +111,39 @@ async function checkServer() {
   }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sessionStatusMatchesPayload(status, payload) {
+  if (!status || status.status !== "ok") return false;
+  return (
+    status.active === true &&
+    status.mode === payload.mode &&
+    status.session_type === (payload.session_type || "standard")
+  );
+}
+
+function stopStatusConfirmed(status) {
+  return (
+    status &&
+    status.status === "ok" &&
+    (status.active === false || Boolean(status.pending_unlock))
+  );
+}
+
+async function waitForStatusConfirmation(predicate, attempts = 5, delayMs = 200) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const status = await api("GET", "/api/status");
+    if (predicate(status)) {
+      renderStatus(status);
+      return status;
+    }
+    if (attempt < attempts - 1) await delay(delayMs);
+  }
+  return null;
+}
+
 // ── Timer (P1: wall-clock anchor + R4: no negative values) ──────────────────
 
 
@@ -118,11 +159,15 @@ function updateRing(remaining) {
 
 function startCountdown(secs) {
   // P1: Don't restart if already counting and values are close
-  if (countdown && Math.abs(currentRemaining - secs) <= 2) return;
-  if (countdown) clearInterval(countdown);
+  if (animationFrameId && Math.abs(currentRemaining - secs) <= 2) return;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
 
-  const anchor = performance.now();
-  const anchorSecs = secs;
+  const anchor = Date.now();
+  const durationMs = secs * 1000;
+  const endTime = anchor + durationMs;
   currentRemaining = secs;
 
   const timerValue = $("#timerValue");
@@ -132,19 +177,33 @@ function startCountdown(secs) {
   if (timerLabel) timerLabel.textContent = "REMAINING";
   updateRing(currentRemaining);
 
-  countdown = setInterval(() => {
-    const elapsed = (performance.now() - anchor) / 1000;
-    currentRemaining = Math.max(0, Math.round(anchorSecs - elapsed));
+  let lastSecs = -1;
 
-    if (timerValue) timerValue.textContent = formatTime(currentRemaining);
-    updateRing(currentRemaining);
+  const tick = () => {
+    const now = Date.now();
+    const remMs = endTime - now;
 
-    if (currentRemaining <= 0) {
-      clearInterval(countdown);
-      countdown = null;
+    if (remMs <= 0) {
+      animationFrameId = null;
+      if (timerValue) timerValue.textContent = formatTime(0);
+      updateRing(0);
       refresh();
+      return;
     }
-  }, 250); // P1: Higher frequency, lower visual drift
+
+    const remSecs = Math.ceil(remMs / 1000);
+    currentRemaining = remSecs;
+
+    if (remSecs !== lastSecs) {
+      if (timerValue) timerValue.textContent = formatTime(currentRemaining);
+      lastSecs = remSecs;
+    }
+    
+    updateRing(remMs / 1000);
+    animationFrameId = requestAnimationFrame(tick);
+  };
+
+  animationFrameId = requestAnimationFrame(tick);
 }
 
 async function fetchGroups() {
@@ -196,9 +255,9 @@ function renderGroups() {
 }
 
 function stopCountdown() {
-  if (countdown) {
-    clearInterval(countdown);
-    countdown = null;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
   }
   currentRemaining = 0;
 
@@ -376,6 +435,95 @@ async function refresh(stateData) {
   }
 }
 
+// ── Block Details ────────────────────────────────────────────────────────────
+
+/**
+ * Compute session configuration preview from current local state.
+ * All data is client-side — no API call needed.
+ * @returns {{ blockType: string, sessionType: string, durationText: string, expiryText: string, domainCount: string }}
+ */
+function computeBlockDetails() {
+  const blockType = mode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+  const sessionLabel = sessionType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
+
+  let totalMinutes;
+  let durationText;
+  if (sessionType === "pomodoro") {
+    totalMinutes = (pomoFocusMin + pomoBreakMin) * pomoCycles;
+    durationText = `${pomoFocusMin}m focus × ${pomoCycles} cycles`;
+  } else {
+    totalMinutes = duration;
+    const hrs = Math.floor(duration / 60);
+    const mins = duration % 60;
+    durationText = hrs > 0 ? `${hrs}h ${mins > 0 ? mins + "m" : ""}`.trim() : `${mins}m`;
+  }
+
+  // Compute expiry from now + totalMinutes
+  const expiryDate = new Date(Date.now() + totalMinutes * 60000);
+  let expiryHrs = expiryDate.getHours();
+  const expiryMins = String(expiryDate.getMinutes()).padStart(2, "0");
+  const ampm = expiryHrs >= 12 ? "PM" : "AM";
+  expiryHrs = expiryHrs % 12 || 12;
+  const expiryText = `${expiryHrs}:${expiryMins} ${ampm}`;
+
+  // Count unique domains from selected groups (or all if none selected)
+  let domainCount = "—";
+  let groupText = "—";
+  try {
+    const groupNames = selectedGroups.size > 0
+      ? Array.from(selectedGroups)
+      : Object.keys(availableGroups);
+
+    if (selectedGroups.size === 0 && Object.keys(availableGroups).length > 0) {
+      groupText = "All Groups";
+    } else if (groupNames.length > 0) {
+      groupText = groupNames.join(", ");
+    }
+
+    const uniqueDomains = new Set();
+    for (const name of groupNames) {
+      const domains = availableGroups[name];
+      if (Array.isArray(domains)) {
+        domains.forEach((d) => uniqueDomains.add(d));
+      }
+    }
+    domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
+  } catch {
+    domainCount = "—";
+    groupText = "—";
+  }
+
+  return { blockType, sessionType: sessionLabel, durationText, expiryText, domainCount, groupText };
+}
+
+/** Populate Block Details dialog with computed values. */
+function renderBlockDetails(details) {
+  const setEl = (id, text) => {
+    const el = $("#" + id);
+    if (el) el.textContent = text;
+  };
+  setEl("detailType", details.blockType);
+  setEl("detailSession", details.sessionType);
+  setEl("detailDuration", details.durationText);
+  setEl("detailExpiry", details.expiryText);
+  setEl("detailGroups", details.groupText);
+  setEl("detailDomains", details.domainCount);
+
+  // Hide error state on fresh render
+  const errorEl = $("#blockDetailsError");
+  if (errorEl) errorEl.classList.add("hidden");
+}
+
+/** Show error message in Block Details dialog. */
+function showBlockDetailsError(msg) {
+  const errorEl = $("#blockDetailsError");
+  const msgEl = $("#blockDetailsErrorMsg");
+  if (errorEl && msgEl) {
+    msgEl.textContent = msg;
+    errorEl.classList.remove("hidden");
+  }
+}
+
 // ── Events ───────────────────────────────────────────────────────────────────
 
 function initEvents() {
@@ -474,10 +622,35 @@ function initEvents() {
     }
   });
 
-  // Start — Shows Intent Dialog
+  // Start — Shows Block Details Dialog first, then Intent Dialog on confirm
   const btnStart = $("#btnStart");
   if (btnStart) {
     btnStart.addEventListener("click", () => {
+      const blockDetailsDialog = $("#blockDetailsDialog");
+      if (blockDetailsDialog) {
+        const details = computeBlockDetails();
+        renderBlockDetails(details);
+        blockDetailsDialog.classList.remove("hidden");
+      }
+    });
+  }
+
+  // Block Details — Cancel
+  const btnCancelDetails = $("#btnCancelDetails");
+  if (btnCancelDetails) {
+    btnCancelDetails.addEventListener("click", () => {
+      const blockDetailsDialog = $("#blockDetailsDialog");
+      if (blockDetailsDialog) blockDetailsDialog.classList.add("hidden");
+    });
+  }
+
+  // Block Details — Confirm → proceed to Intent Dialog
+  const btnConfirmDetails = $("#btnConfirmDetails");
+  if (btnConfirmDetails) {
+    btnConfirmDetails.addEventListener("click", () => {
+      const blockDetailsDialog = $("#blockDetailsDialog");
+      if (blockDetailsDialog) blockDetailsDialog.classList.add("hidden");
+
       const intentDialog = $("#intentDialog");
       const intentInput = $("#intentDialogInput");
       if (intentDialog) {
@@ -489,6 +662,16 @@ function initEvents() {
           intentInput.focus();
         }
       }
+    });
+  }
+
+  // Block Details — Retry (re-fetch groups data)
+  const btnRetryDetails = $("#blockDetailsRetry");
+  if (btnRetryDetails) {
+    btnRetryDetails.addEventListener("click", async () => {
+      await fetchGroups();
+      const details = computeBlockDetails();
+      renderBlockDetails(details);
     });
   }
 
@@ -557,7 +740,12 @@ function initEvents() {
       try {
         const res = await api("POST", "/api/start", payload);
         if (res.status === "ok") {
-          await refresh();
+          const confirmed = await waitForStatusConfirmation((status) =>
+            sessionStatusMatchesPayload(status, payload),
+          );
+          if (!confirmed) {
+            showError("Session request accepted; waiting for daemon confirmation.");
+          }
         } else {
           showError(res.message || "Failed to start session.");
         }
@@ -594,7 +782,12 @@ function initEvents() {
       try {
         const res = await api("POST", "/api/start", payload);
         if (res.status === "ok") {
-          await refresh();
+          const confirmed = await waitForStatusConfirmation((status) =>
+            sessionStatusMatchesPayload(status, payload),
+          );
+          if (!confirmed) {
+            showError("Rescue request accepted; waiting for daemon confirmation.");
+          }
         } else {
           showError(res.message || "Failed to activate rescue.");
         }
@@ -654,9 +847,13 @@ function initEvents() {
       try {
         const res = await api("POST", "/api/stop", { key });
         if (res.status === "pending" || res.status === "ok") {
-          const stopDialog = $("#stopDialog");
-          if (stopDialog) stopDialog.classList.add("hidden");
-          await refresh();
+          const confirmed = await waitForStatusConfirmation(stopStatusConfirmed);
+          if (confirmed) {
+            const stopDialog = $("#stopDialog");
+            if (stopDialog) stopDialog.classList.add("hidden");
+          } else {
+            showError("Unlock accepted; waiting for daemon confirmation.");
+          }
         } else {
           if (errMsg) {
             errMsg.textContent = res.message || "Invalid passphrase.";

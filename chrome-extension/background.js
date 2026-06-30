@@ -16,14 +16,67 @@ const POLL_INTERVAL = 3000;
 const RULE_ID_START = 1000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY = 2000;
+const FALLBACK_DYNAMIC_RULE_LIMIT = 5000;
 
 // State management — persisted via chrome.storage.session to survive SW suspension
 let lastActive = false;
 let lastMode = null;
 let lastPhase = null; // S3: Track pomodoro phase for change broadcasts
+let lastRulesSignature = "";
 let connectionAttempts = 0;
 let isRetrying = false;
 let syncInProgress = false; // P4: Guard against cascading syncs
+let apiToken = "";
+class RuleCapacityError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RuleCapacityError";
+  }
+}
+
+function getDynamicRuleLimit() {
+  return (
+    chrome.declarativeNetRequest.MAX_NUMBER_OF_DYNAMIC_RULES ||
+    chrome.declarativeNetRequest.MAX_NUMBER_OF_DYNAMIC_AND_SESSION_RULES ||
+    FALLBACK_DYNAMIC_RULE_LIMIT
+  );
+}
+
+function assertDynamicRuleCapacity(rules, context) {
+  const limit = getDynamicRuleLimit();
+  if (rules.length <= limit) return;
+  throw new RuleCapacityError(
+    `${context} would require ${rules.length} Chrome DNR rules, exceeding the limit of ${limit}. Reduce the active domain list or split the session.`,
+  );
+}
+
+function surfaceRuleCapacityError(error) {
+  log(error.message, "error");
+  chrome.action.setBadgeText({ text: "ERR" });
+  chrome.action.setBadgeBackgroundColor({ color: "#b91c1c" });
+  chrome.notifications.create("forcedfocus-rule-capacity", {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: "ForcedFocus rule limit reached",
+    message: error.message,
+    priority: 1,
+  });
+}
+
+async function loadApiToken() {
+  try {
+    const res = await fetch(API + "/", {
+      signal: AbortSignal.timeout(2000),
+    });
+    const html = await res.text();
+    const match = html.match(/window\.apiToken\s*=\s*["']([^"']+)["']/);
+    if (match && match[1]) {
+      apiToken = match[1];
+    }
+  } catch (e) {
+    console.error("[ForcedFocus] Background token load failed:", e);
+  }
+}
 
 // R1: In-memory set of currently blocked domains for O(1) webNavigation lookups
 let blockedDomainsSet = new Set();
@@ -63,6 +116,7 @@ async function loadState() {
       "lastActive",
       "lastMode",
       "lastPhase",
+      "lastRulesSignature",
       "blockedDomains",
       "currentBlockMode",
       "permaDomains",
@@ -73,6 +127,7 @@ async function loadState() {
     lastActive = result.lastActive || false;
     lastMode = result.lastMode || null;
     lastPhase = result.lastPhase || null;
+    lastRulesSignature = result.lastRulesSignature || "";
     // R1: Restore blocked domains set from storage (survives SW suspension)
     if (result.blockedDomains && Array.isArray(result.blockedDomains)) {
       blockedDomainsSet = new Set(result.blockedDomains);
@@ -96,6 +151,7 @@ async function saveState() {
       lastActive,
       lastMode,
       lastPhase,
+      lastRulesSignature,
       // R1: Persist blocked domains (capped at 5000 to avoid storage limits)
       blockedDomains: [...blockedDomainsSet].slice(0, 5000),
       currentBlockMode,
@@ -117,6 +173,16 @@ const stateLoadedPromise = loadState();
 function log(message, level = "info") {
   const timestamp = new Date().toISOString();
   console.log(`[ForcedFocus][${timestamp}][${level.toUpperCase()}] ${message}`);
+}
+
+function normalizeDomains(domains = []) {
+  return [...new Set(domains.map((d) => String(d).trim().toLowerCase()).filter(Boolean))].sort();
+}
+
+function buildRulesSignature(modeKey, sessionDomains = []) {
+  const sessionPart = normalizeDomains(sessionDomains).join(",");
+  const permaPart = normalizeDomains([...permaBlockedSet]).join(",");
+  return `${modeKey}|session:${sessionPart}|perma:${permaPart}`;
 }
 
 function isErrorRecoverable(error) {
@@ -152,6 +218,8 @@ async function fetchWithRetry(
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
     }
   }
+  // B2: Safety net — should be unreachable, but guards against silent undefined return
+  throw new Error(`fetchWithRetry: All ${maxRetries} retries exhausted for ${url}`);
 }
 
 // ── Domain Matching (R1) ──────────────────────────────────────────────────────
@@ -425,6 +493,36 @@ function generateWhitelistRules(allowedDomains) {
     });
   });
 
+  // Permanent blocks must win even if a domain is also in the whitelist.
+  for (const domain of normalizeDomains([...permaBlockedSet])) {
+    rules.push({
+      id: id++,
+      priority: 3,
+      action: {
+        type: "redirect",
+        redirect: {
+          url:
+            chrome.runtime.getURL("blocked.html") +
+            "?domain=" +
+            encodeURIComponent(domain),
+        },
+      },
+      condition: {
+        urlFilter: `||${domain}`,
+        resourceTypes: MAIN_FRAME_TYPES,
+      },
+    });
+    rules.push({
+      id: id++,
+      priority: 3,
+      action: { type: "block" },
+      condition: {
+        urlFilter: `||${domain}`,
+        resourceTypes: SUB_RESOURCE_TYPES,
+      },
+    });
+  }
+
   return rules;
 }
 
@@ -446,30 +544,33 @@ async function clearBlockRules() {
 }
 
 async function applyBlockRules(domains) {
-  await clearBlockRules();
   // Merge session domains with permanent blocklist
-  const allDomains = [...new Set([...domains, ...permaBlockedSet])];
+  const allDomains = normalizeDomains([...domains, ...permaBlockedSet]);
   if (allDomains.length === 0) {
+    await clearBlockRules();
     log("No domains to block.");
     return;
   }
   const { rules } = generateBlockRules(allDomains);
+  assertDynamicRuleCapacity(rules, "Blacklist session");
+  await clearBlockRules();
   await updateDynamicRules(rules);
   // R1: Update in-memory blocked domains set for webNavigation matching
-  blockedDomainsSet = new Set(domains.map((d) => d.toLowerCase()));
+  blockedDomainsSet = new Set(normalizeDomains(domains));
   currentBlockMode = "blacklist";
   log(`Applied ${rules.length} block rules for ${allDomains.length} domains (${permaBlockedSet.size} permanent).`);
 }
 
 async function applyWhitelistRules(allowedDomains) {
+  const rules = generateWhitelistRules(normalizeDomains(allowedDomains));
+  assertDynamicRuleCapacity(rules, "Whitelist session");
   await clearBlockRules();
-  const rules = generateWhitelistRules(allowedDomains);
   await updateDynamicRules(rules);
   // R1: For whitelist, the set contains ALLOWED domains
-  blockedDomainsSet = new Set(allowedDomains.map((d) => d.toLowerCase()));
+  blockedDomainsSet = new Set(normalizeDomains(allowedDomains));
   currentBlockMode = "whitelist";
   log(
-    `Applied whitelist rules: ${allowedDomains.length} allowed, rest blocked.`,
+    `Applied whitelist rules: ${normalizeDomains(allowedDomains).length} allowed, rest blocked.`,
   );
 }
 
@@ -477,9 +578,24 @@ async function applyWhitelistRules(allowedDomains) {
 
 async function syncPermaBlocklist() {
   try {
-    const response = await fetch(`${API}/api/perma-blocklist`, {
+    if (!apiToken) {
+      await loadApiToken();
+    }
+    const headers = {};
+    if (apiToken) headers["X-API-Token"] = apiToken;
+    let response = await fetch(`${API}/api/perma-blocklist`, {
+      headers,
       signal: AbortSignal.timeout(3000),
     });
+    if (response.status === 401) {
+      await loadApiToken();
+      const newHeaders = {};
+      if (apiToken) newHeaders["X-API-Token"] = apiToken;
+      response = await fetch(`${API}/api/perma-blocklist`, {
+        headers: newHeaders,
+        signal: AbortSignal.timeout(3000),
+      });
+    }
     if (!response.ok) return;
     const data = await response.json();
     
@@ -487,39 +603,65 @@ async function syncPermaBlocklist() {
     cachedPermaData = data;
     await saveState();
 
-    const domains = data.domains || [];
+    const domains = normalizeDomains(data.domains || []);
 
     // Quick hash check to avoid unnecessary rule rebuilds
-    const hash = domains.sort().join(",");
+    const hash = domains.join(",");
     if (hash === lastPermaHash) return;
     lastPermaHash = hash;
 
     const oldSize = permaBlockedSet.size;
-    permaBlockedSet = new Set(domains.map((d) => d.toLowerCase()));
+    permaBlockedSet = new Set(domains);
     await saveState();
 
     log(`Permanent blocklist synced: ${permaBlockedSet.size} domains (was ${oldSize}).`);
 
     // If no session is active, apply/update perma rules directly
     if (!lastActive) {
+      let rules = [];
+      if (permaBlockedSet.size > 0) {
+        ({ rules } = generateBlockRules([...permaBlockedSet]));
+        assertDynamicRuleCapacity(rules, "Permanent blocklist");
+      }
       await clearBlockRules();
       if (permaBlockedSet.size > 0) {
-        const { rules } = generateBlockRules([...permaBlockedSet]);
         await updateDynamicRules(rules);
+        lastRulesSignature = buildRulesSignature("idle", []);
         log(`Applied ${rules.length} permanent block rules (no active session).`);
+      } else {
+        lastRulesSignature = buildRulesSignature("idle", []);
       }
+      await saveState();
     }
     // If a session IS active, the rules will be merged on next applyBlockRules call
   } catch (e) {
+    if (e.name === "RuleCapacityError") {
+      surfaceRuleCapacityError(e);
+    }
     // Non-critical — will retry on next sync cycle
   }
 }
 
 async function syncSettings() {
   try {
-    const response = await fetch(`${API}/api/settings`, {
+    if (!apiToken) {
+      await loadApiToken();
+    }
+    const headers = {};
+    if (apiToken) headers["X-API-Token"] = apiToken;
+    let response = await fetch(`${API}/api/settings`, {
+      headers,
       signal: AbortSignal.timeout(3000),
     });
+    if (response.status === 401) {
+      await loadApiToken();
+      const newHeaders = {};
+      if (apiToken) newHeaders["X-API-Token"] = apiToken;
+      response = await fetch(`${API}/api/settings`, {
+        headers: newHeaders,
+        signal: AbortSignal.timeout(3000),
+      });
+    }
     if (!response.ok) return;
     const data = await response.json();
     cachedSettings = data;
@@ -575,11 +717,8 @@ async function syncBlockRules(status = null) {
       cacheTimestamp = Date.now();
     }
 
-    // Sync permanent blocklist from daemon
-    await syncPermaBlocklist();
-
-    // Sync settings from daemon
-    await syncSettings();
+    // P1: Sync permanent blocklist and settings in parallel (independent operations)
+    await Promise.allSettled([syncPermaBlocklist(), syncSettings()]);
 
     // Reset connection attempts on successful fetch
     connectionAttempts = 0;
@@ -617,12 +756,23 @@ async function syncBlockRules(status = null) {
       status.session_type === "pomodoro" &&
       status.pomo_phase === "break"
     ) {
-      if (lastActive) {
+      const breakSignature = buildRulesSignature("break", []);
+      if (lastRulesSignature !== breakSignature || lastActive) {
+        let permanentRules = [];
+        if (permaBlockedSet.size > 0) {
+          ({ rules: permanentRules } = generateBlockRules([...permaBlockedSet]));
+          assertDynamicRuleCapacity(permanentRules, "Pomodoro break permanent blocklist");
+        }
         await clearBlockRules();
         blockedDomainsSet.clear();
         currentBlockMode = null;
+        if (permaBlockedSet.size > 0) {
+          await updateDynamicRules(permanentRules);
+          log(`Pomodoro break — kept ${permanentRules.length} permanent block rules.`);
+        }
         lastActive = false;
         lastMode = null;
+        lastRulesSignature = breakSignature;
         await saveState();
       }
       chrome.action.setBadgeText({ text: "BRK" });
@@ -631,24 +781,27 @@ async function syncBlockRules(status = null) {
     }
 
     if (status.active && status.mode === "blacklist") {
-      if (!lastActive || lastMode !== "blacklist") {
-        const sessionData = await fetchSessionDomains();
-        const domains = sessionData.domains || [];
+      const sessionData = await fetchSessionDomains();
+      const domains = normalizeDomains(sessionData.domains || []);
+      const nextSignature = buildRulesSignature("blacklist", domains);
+      if (!lastActive || lastMode !== "blacklist" || lastRulesSignature !== nextSignature) {
         await applyBlockRules(domains);
         await clearBrowserCache();
         lastActive = true;
         lastMode = "blacklist";
+        lastRulesSignature = nextSignature;
         await saveState();
       }
     } else if (status.active && status.mode === "whitelist") {
       const isRescue = status.session_type === "rescue";
       const modeKey = isRescue ? "rescue" : "whitelist";
-      if (!lastActive || lastMode !== modeKey) {
-        let allowed = [];
-        if (!isRescue) {
-          const sessionData = await fetchSessionDomains();
-          allowed = sessionData.domains || [];
-        }
+      let allowed = [];
+      if (!isRescue) {
+        const sessionData = await fetchSessionDomains();
+        allowed = normalizeDomains(sessionData.domains || []);
+      }
+      const nextSignature = buildRulesSignature(modeKey, allowed);
+      if (!lastActive || lastMode !== modeKey || lastRulesSignature !== nextSignature) {
         await applyWhitelistRules(allowed);
         if (isRescue) {
           currentBlockMode = "rescue";
@@ -656,11 +809,18 @@ async function syncBlockRules(status = null) {
         await clearBrowserCache();
         lastActive = true;
         lastMode = modeKey;
+        lastRulesSignature = nextSignature;
         await saveState();
       }
     } else {
       // Idle — remove session rules but keep permanent blocks
-      if (lastActive) {
+      const idleSignature = buildRulesSignature("idle", []);
+      if (lastActive || lastRulesSignature !== idleSignature) {
+        let permanentRules = [];
+        if (permaBlockedSet.size > 0) {
+          ({ rules: permanentRules } = generateBlockRules([...permaBlockedSet]));
+          assertDynamicRuleCapacity(permanentRules, "Idle permanent blocklist");
+        }
         await clearBlockRules();
         blockedDomainsSet.clear();
         currentBlockMode = null;
@@ -668,10 +828,10 @@ async function syncBlockRules(status = null) {
         lastMode = null;
         // Re-apply permanent block rules if any exist
         if (permaBlockedSet.size > 0) {
-          const { rules } = generateBlockRules([...permaBlockedSet]);
-          await updateDynamicRules(rules);
-          log(`Session ended — re-applied ${rules.length} permanent block rules.`);
+          await updateDynamicRules(permanentRules);
+          log(`Session ended — re-applied ${permanentRules.length} permanent block rules.`);
         }
+        lastRulesSignature = idleSignature;
         await saveState();
       }
     }
@@ -690,6 +850,10 @@ async function syncBlockRules(status = null) {
     // Broadcast state to active blocked tab ports
     broadcastToBlockedTabs();
   } catch (error) {
+    if (error.name === "RuleCapacityError") {
+      surfaceRuleCapacityError(error);
+      return;
+    }
     connectionAttempts++;
     log(
       `Server unreachable (${connectionAttempts} attempts) — keeping existing rules.`,
@@ -703,7 +867,7 @@ async function syncBlockRules(status = null) {
         "warn",
       );
       chrome.alarms.clear("syncRules");
-      chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+      chrome.alarms.create("syncRules", { periodInMinutes: 5 }); // B1: Actually reduce frequency (was 1, same as normal)
     }
   } finally {
     syncInProgress = false;
@@ -717,6 +881,25 @@ async function syncBlockRules(status = null) {
 // Track recent notifications to debounce (prevent spam from rapid navigations)
 const _notifiedDomains = new Map();
 const NOTIF_DEBOUNCE_MS = 3000;
+const NOTIF_DOMAINS_MAX = 100; // P2: Cap to prevent unbounded growth
+
+/** P2: Purge stale entries from _notifiedDomains to prevent memory leak. */
+function cleanupNotifiedDomains() {
+  const now = Date.now();
+  for (const [domain, timestamp] of _notifiedDomains) {
+    if (now - timestamp > NOTIF_DEBOUNCE_MS * 10) {
+      _notifiedDomains.delete(domain);
+    }
+  }
+  // Hard cap: if still over limit, remove oldest entries
+  if (_notifiedDomains.size > NOTIF_DOMAINS_MAX) {
+    const entries = [..._notifiedDomains.entries()].sort((a, b) => a[1] - b[1]);
+    const excess = entries.length - NOTIF_DOMAINS_MAX;
+    for (let i = 0; i < excess; i++) {
+      _notifiedDomains.delete(entries[i][0]);
+    }
+  }
+}
 
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   // Only intercept top-level navigations (not iframes, etc.)
@@ -724,12 +907,29 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
   await stateLoadedPromise;
 
+  const now = Date.now();
   if (shouldBlockUrl(details.url)) {
+    // If the cache is expired, verify current status with daemon immediately to prevent SW lag
+    if (now - cacheTimestamp > CACHE_TTL) {
+      try {
+        const status = await fetchSessionStatus();
+        // If daemon is actually idle, sync and skip block redirect
+        if (!status.active && permaBlockedSet.size === 0) {
+          await syncBlockRules(status);
+          return;
+        }
+      } catch (e) {
+        // Ignore network errors and fallback to blocking
+      }
+    }
+
     const hostname = extractHostname(details.url);
     const blockedUrl =
       chrome.runtime.getURL("blocked.html") +
       "?domain=" +
-      encodeURIComponent(hostname || "this site");
+      encodeURIComponent(hostname || "this site") +
+      "&url=" +
+      encodeURIComponent(details.url);
 
     // Record for analytics
     if (hostname) recordBlockedRequest(hostname);
@@ -738,10 +938,11 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     log(`[R1] Pre-navigation redirect: ${hostname} → blocked.html`);
 
     // Chrome notification (debounced per domain)
-    const now = Date.now();
+    const nowNotif = Date.now();
     const lastNotif = _notifiedDomains.get(hostname) || 0;
-    if (now - lastNotif > NOTIF_DEBOUNCE_MS) {
-      _notifiedDomains.set(hostname, now);
+    if (nowNotif - lastNotif > NOTIF_DEBOUNCE_MS) {
+      cleanupNotifiedDomains(); // P2: Prevent unbounded growth
+      _notifiedDomains.set(hostname, nowNotif);
       chrome.notifications.create(`blocked-${hostname}`, {
         type: "basic",
         iconUrl: "icons/icon128.png",
@@ -778,8 +979,20 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
   await stateLoadedPromise;
 
+  const now = Date.now();
   // Check if this URL belongs to a blocked domain
   if (shouldBlockUrl(details.url)) {
+    // Verify status immediately to prevent redirecting after the session ends
+    if (now - cacheTimestamp > CACHE_TTL) {
+      try {
+        const status = await fetchSessionStatus();
+        if (!status.active && permaBlockedSet.size === 0) {
+          await syncBlockRules(status);
+          return;
+        }
+      } catch (e) {}
+    }
+
     const hostname = extractHostname(details.url);
     const blockedUrl =
       chrome.runtime.getURL("blocked.html") +
@@ -796,8 +1009,24 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 // ── Extension Lifecycle & IPC ──────────────────────────────────────────────────
 
 let eventSource = null;
+let sseReconnectTimer = null;
+
+function scheduleSSEReconnect() {
+  if (sseReconnectTimer) return;
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    connectSSE();
+  }, 5000);
+}
 
 function connectSSE() {
+  if (eventSource && (eventSource.readyState === 0 || eventSource.readyState === 1)) {
+    return;
+  }
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
   if (eventSource) eventSource.close();
   eventSource = new EventSource(`${API}/api/stream`);
   
@@ -816,7 +1045,7 @@ function connectSSE() {
     log("SSE connection lost. Reconnecting in 5s...", "warning");
     eventSource.close();
     eventSource = null;
-    setTimeout(connectSSE, 5000);
+    scheduleSSEReconnect();
   };
 }
 
@@ -838,16 +1067,20 @@ function broadcastToBlockedTabs() {
   }
 }
 
+function ensureSyncAlarm() {
+  chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "syncRules") {
-    // If SSE is active, it handles updates. If disconnected, alarm is a fallback.
+    // Alarms are the guaranteed MV3 sync path; SSE is only best-effort.
     syncBlockRules();
   }
 });
 
 chrome.runtime.onStartup.addListener(() => {
   log("Extension started");
-  chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+  ensureSyncAlarm();
   connectSSE();
   stateLoadedPromise.then(() => syncBlockRules());
 });
@@ -861,14 +1094,140 @@ chrome.runtime.onInstalled.addListener((details) => {
       analytics = result.analytics;
     }
   });
-  chrome.alarms.create("syncRules", { periodInMinutes: 1 });
+  
+  // Create context menus
+  chrome.contextMenus.create({
+    id: "forcedfocus-parent",
+    title: "Forced Focus",
+    contexts: ["page", "link"]
+  });
+  chrome.contextMenus.create({
+    id: "add-blacklist",
+    parentId: "forcedfocus-parent",
+    title: "Add to Blacklist",
+    contexts: ["page", "link"]
+  });
+  chrome.contextMenus.create({
+    id: "add-whitelist",
+    parentId: "forcedfocus-parent",
+    title: "Add to Whitelist",
+    contexts: ["page", "link"]
+  });
+  chrome.contextMenus.create({
+    id: "add-perma-block",
+    parentId: "forcedfocus-parent",
+    title: "Add to Permanent Block",
+    contexts: ["page", "link"]
+  });
+
+  ensureSyncAlarm();
   connectSSE();
   stateLoadedPromise.then(() => syncBlockRules());
 });
 
 // Also run immediately on service worker start (covers wakeup from suspension)
+ensureSyncAlarm();
 connectSSE();
 stateLoadedPromise.then(() => syncBlockRules());
+
+// ── Context Menu Actions ──────────────────────────────────────────────────────
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  const url = info.linkUrl || info.pageUrl;
+  const domain = extractHostname(url);
+  if (!domain) {
+    showContextMenuNotification(tab.id, "error", "Could not extract a valid domain.", true);
+    return;
+  }
+
+  let endpoint = "";
+  let listName = "";
+
+  if (info.menuItemId === "add-blacklist") {
+    endpoint = `${API}/api/lists/blacklist`;
+    listName = "Blacklist";
+  } else if (info.menuItemId === "add-whitelist") {
+    endpoint = `${API}/api/lists/whitelist`;
+    listName = "Whitelist";
+  } else if (info.menuItemId === "add-perma-block") {
+    endpoint = `${API}/api/perma-blocklist`;
+    listName = "Permanent Blocklist";
+  } else {
+    return;
+  }
+
+  try {
+    if (!apiToken) await loadApiToken();
+    const headers = { "Content-Type": "application/json" };
+    if (apiToken) headers["X-API-Token"] = apiToken;
+
+    let response = await fetchWithRetry(endpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ domain }),
+    });
+
+    if (response.status === 401) {
+      await loadApiToken();
+      if (apiToken) headers["X-API-Token"] = apiToken;
+      response = await fetchWithRetry(endpoint, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({ domain }),
+      });
+    }
+
+    const data = await response.json();
+    if (response.ok && data.status === "ok") {
+      showContextMenuNotification(tab.id, domain, `✓ Added ${domain} to ${listName}`, false);
+    } else {
+      showContextMenuNotification(tab.id, domain, data.message || "Failed to add domain.", true);
+    }
+  } catch (err) {
+    console.error("Context menu action failed:", err);
+    showContextMenuNotification(tab.id, domain, "Connection to ForcedFocus daemon failed.", true);
+  }
+});
+
+function showContextMenuNotification(tabId, id, message, isError = false) {
+  if (!tabId) return;
+  chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: (msg, err) => {
+      const toast = document.createElement("div");
+      toast.innerText = msg;
+      toast.style.position = "fixed";
+      toast.style.bottom = "24px";
+      toast.style.right = "24px";
+      toast.style.padding = "12px 24px";
+      toast.style.backgroundColor = err ? "#ef4444" : "#10b981";
+      toast.style.color = "white";
+      toast.style.borderRadius = "8px";
+      toast.style.boxShadow = "0 10px 30px rgba(0,0,0,0.2)";
+      toast.style.fontFamily = "system-ui, -apple-system, sans-serif";
+      toast.style.fontSize = "14px";
+      toast.style.fontWeight = "500";
+      toast.style.zIndex = "2147483647";
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(10px)";
+      toast.style.transition = "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)";
+      toast.style.pointerEvents = "none";
+      document.body.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.style.opacity = "1";
+        toast.style.transform = "translateY(0)";
+      });
+
+      setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(10px)";
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    },
+    args: [message, isError]
+  }).catch(e => console.error("Toast injection failed:", e));
+}
 
 // ── Connection Management ──────────────────────────────────────────────────────
 

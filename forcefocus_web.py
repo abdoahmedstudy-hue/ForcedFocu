@@ -14,8 +14,8 @@ Runs on localhost:7070 (not exposed to network).
     Do NOT add new features here — use the daemon's embedded server instead.
 """
 
-import os
 import sys
+import logging
 import json
 import socket
 import time
@@ -76,17 +76,25 @@ class ForcedFocusHandler(BaseHTTPRequestHandler):
             return True
         if origin in ("http://localhost:7070", "http://127.0.0.1:7070"):
             return True
-        if origin == "chrome-extension://hcgpgflhkpdccdjkkobofpaemcgjmhdc":
-            return True
+        if origin.startswith("chrome-extension://"):
+            ext_id = origin.replace("chrome-extension://", "")
+            try:
+                # Query settings from daemon to check allowed extension IDs
+                resp = send_to_daemon({"action": "get_settings"})
+                if resp.get("status") == "ok":
+                    allowed_ids = resp.get("settings", {}).get("allowed_extension_ids", ["hcgpgflhkpdccdjkkobofpaemcgjmhdc"])
+                    if isinstance(allowed_ids, list):
+                        return ext_id in allowed_ids or "*" in allowed_ids
+                    if isinstance(allowed_ids, str):
+                        return ext_id == allowed_ids or allowed_ids == "*"
+            except Exception:
+                pass
         return False
 
     def _get_cors_origin(self) -> str:
         """Return the allowed origin for CORS headers."""
         origin = self.headers.get("Origin")
-        if origin and (
-            origin in ("http://localhost:7070", "http://127.0.0.1:7070")
-            or origin == "chrome-extension://hcgpgflhkpdccdjkkobofpaemcgjmhdc"
-        ):
+        if origin and self._is_origin_allowed():
             return origin
         return "http://127.0.0.1:7070"
 
@@ -270,6 +278,13 @@ class ReusableHTTPServer(HTTPServer):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+    logging.error(
+        "CRITICAL: forcefocus_web.py is deprecated and no longer used.\n"
+        "All web and API functionality has been merged into forcefocus_daemon.py.\n"
+        "Please run 'sudo python3 forcefocus_daemon.py' instead."
+    )
+    sys.exit(1)
     # Allow running from source dir for development
     global WEB_DIR
     local_web = Path(__file__).parent / "web"

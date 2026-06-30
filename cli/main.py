@@ -18,6 +18,7 @@ from cli.commands.web import cmd_web
 from cli.commands.domains import cmd_domains
 from cli.commands.settings import cmd_settings
 from cli.commands.sound import cmd_sound
+from cli.commands.templates import cmd_templates
 
 def build_parser():
     # Base parser with global flags
@@ -186,6 +187,7 @@ def build_parser():
     
     p_sched_add = sub_sched.add_parser("add", help="Add schedule")
     p_sched_add.add_argument("--recurring", action="store_true", help="Create recurring schedule")
+    p_sched_add.add_argument("--name", default="Focus Ritual", help="Recurring schedule name")
     p_sched_add.add_argument("--days", help="Comma separated days (0=Mon, 6=Sun)")
     p_sched_add.add_argument("--time", help="Start time HH:MM")
     p_sched_add.add_argument("--duration", type=int, default=120, help="Duration in minutes")
@@ -208,6 +210,30 @@ def build_parser():
     
     p_sched_rm = sub_sched.add_parser("remove", help="Remove schedule")
     p_sched_rm.add_argument("id", help="Schedule ID")
+
+    p_sched_pause = sub_sched.add_parser("pause", help="Pause a recurring schedule")
+    p_sched_pause.add_argument("id", help="Schedule ID")
+
+    p_sched_resume = sub_sched.add_parser("resume", help="Resume a recurring schedule")
+    p_sched_resume.add_argument("id", help="Schedule ID")
+
+    p_sched_dup = sub_sched.add_parser("duplicate", help="Duplicate a recurring schedule")
+    p_sched_dup.add_argument("id", help="Schedule ID")
+    p_sched_dup.add_argument("--name", help="Name for the duplicate")
+
+    p_sched_edit = sub_sched.add_parser("edit", help="Edit a recurring schedule")
+    p_sched_edit.add_argument("id", help="Schedule ID")
+    p_sched_edit.add_argument("--name", help="Recurring schedule name")
+    p_sched_edit.add_argument("--days", help="Comma separated days (0=Mon, 6=Sun)")
+    p_sched_edit.add_argument("--time", help="Start time HH:MM")
+    p_sched_edit.add_argument("--duration", type=int, help="Duration in minutes")
+    p_sched_edit.add_argument("--mode", choices=["blacklist", "whitelist"], help="Mode")
+    p_sched_edit.add_argument("--type", dest="session_type", choices=["standard", "pomodoro", "rescue"], help="Session type")
+    p_sched_edit.add_argument("--focus", type=int, help="Pomodoro focus minutes")
+    p_sched_edit.add_argument("--break", dest="break_time", type=int, help="Pomodoro break minutes")
+    p_sched_edit.add_argument("--cycles", type=int, help="Pomodoro cycle count")
+    p_sched_edit.add_argument("--groups", "-g", nargs="*", help="Groups to include in the session")
+    p_sched_edit.add_argument("--enabled", choices=["true", "false"], help="Enable or pause rule")
     p_schedule.set_defaults(func=cmd_schedule)
 
     # perma-block parent parser for inheriting human and agent flags
@@ -301,6 +327,37 @@ def build_parser():
     p_sound_del.add_argument("filename", help="Sound file name to delete")
     p_sound.set_defaults(func=cmd_sound)
 
+    # templates
+    p_templates = sub.add_parser("templates", help="Manage smart session templates")
+    p_templates.add_argument("--human", "-H", action="store_true", help="Force human-friendly output")
+    p_templates.add_argument("--agent", "-A", action="store_true", help="Force agent-friendly output")
+    sub_templates = p_templates.add_subparsers(dest="action", help="Template action")
+    sub_templates.required = True
+
+    sub_templates.add_parser("list", help="List session templates")
+
+    p_tpl_add = sub_templates.add_parser("add", help="Create a session template")
+    p_tpl_add.add_argument("name", help="Template name")
+    p_tpl_add.add_argument("--duration", "-d", type=int, default=120, help="Duration in minutes")
+    p_tpl_add.add_argument("--mode", "-m", choices=["blacklist", "whitelist"], default="blacklist", help="Blocking mode")
+    p_tpl_add.add_argument("--type", dest="session_type", choices=["standard", "pomodoro", "rescue"], default="standard", help="Session type")
+    p_tpl_add.add_argument("--focus", type=int, default=25, help="Pomodoro focus minutes")
+    p_tpl_add.add_argument("--break", dest="break_time", type=int, default=5, help="Pomodoro break minutes")
+    p_tpl_add.add_argument("--cycles", type=int, default=4, help="Pomodoro cycle count")
+    p_tpl_add.add_argument("--groups", "-g", nargs="+", help="Groups to include")
+    p_tpl_add.add_argument("--intent", help="Default session intent")
+
+    p_tpl_start = sub_templates.add_parser("start", help="Start a template by id or name")
+    p_tpl_start.add_argument("template", help="Template id, id prefix, or exact name")
+
+    p_tpl_remove = sub_templates.add_parser("remove", help="Remove a template by id or name")
+    p_tpl_remove.add_argument("template", help="Template id, id prefix, or exact name")
+
+    p_tpl_duplicate = sub_templates.add_parser("duplicate", help="Duplicate a template")
+    p_tpl_duplicate.add_argument("template", help="Template id, id prefix, or exact name")
+    p_tpl_duplicate.add_argument("--name", help="Name for the duplicate")
+    p_templates.set_defaults(func=cmd_templates)
+
     return parser
 
 def print_rich_help(parser):
@@ -347,6 +404,7 @@ def print_rich_help(parser):
         "domains": "Manage regular domain lists (blacklist/whitelist)",
         "settings": "Manage daemon settings",
         "sound": "Manage notification/session sound files",
+        "templates": "Manage smart session templates",
     }
     for cmd, desc in commands.items():
         table.add_row(cmd, desc)

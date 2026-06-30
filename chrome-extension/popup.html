@@ -201,6 +201,29 @@
       <button class="btn-stop" id="btnStop">🔐 Request Unlock</button>
     </div>
 
+    <!-- Block Details Dialog -->
+    <div class="stop-dialog hidden" id="blockDetailsDialog">
+      <div class="block-details-header">
+        <span>📋</span> <strong>Block Details</strong>
+      </div>
+      <div class="block-details-body" id="blockDetailsBody">
+        <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value" id="detailType">—</span></div>
+        <div class="detail-row"><span class="detail-label">Session</span><span class="detail-value" id="detailSession">—</span></div>
+        <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value" id="detailDuration">—</span></div>
+        <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value" id="detailExpiry">—</span></div>
+        <div class="detail-row"><span class="detail-label">Groups</span><span class="detail-value" id="detailGroups">—</span></div>
+        <div class="detail-row"><span class="detail-label">Domains</span><span class="detail-value" id="detailDomains">—</span></div>
+      </div>
+      <div class="block-details-error hidden" id="blockDetailsError">
+        <span id="blockDetailsErrorMsg"></span>
+        <button class="detail-retry-btn" id="blockDetailsRetry">↻ Retry</button>
+      </div>
+      <div class="dialog-btns">
+        <button class="dbtn dbtn-cancel" id="btnCancelDetails">Cancel</button>
+        <button class="dbtn dbtn-start" id="btnConfirmDetails">Confirm & Start</button>
+      </div>
+    </div>
+
     <!-- Intent Dialog -->
     <div class="stop-dialog hidden" id="intentDialog">
       <p>🎯 Focus Intent:</p>

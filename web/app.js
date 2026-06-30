@@ -7,25 +7,41 @@ import { escapeHtml, formatTime, extractDomain } from "./shared/utils.js";
 import { renderIntentTasks } from "./shared/intent-tasks.js";
 
 const API = "";
+const TIMER_CIRCUMFERENCE = 565.48; // 2 * Math.PI * 90
 let currentMode = "blacklist";
 let selectedDuration = 120;
-let countdownInterval = null;
-let pollInterval = null;
+let currentType = "standard";
 let totalSessionSeconds = 0;
-let currentRemaining = 0;
+let currentRemaining = 0; // Guard against timer drift
+let animationFrameId = null;
+let countdownSignature = "";
+let countdownRefreshTimeout = null;
+let pollInterval = null;
 
 let sessionType = "standard";
 let pomoFocusMin = 25;
 let pomoBreakMin = 5;
 let pomoCycles = 4;
 
-let scheduleType = "now"; // 'now', 'in', 'at'
+let scheduleType = "in"; // 'now', 'in', 'at'
 let availableGroups = {};
 let selectedGroups = new Set();
 let apiToken = ""; // Per-launch API token for mutation auth
 let lastActiveState = false;
+let lastPrayerState = false;
+let lastPrayerData = null;
+let localPrayerTargetMs = 0;
+let localPrayerActiveTargetMs = 0;
 let sessionSnapshot = { intent: "", tasks: [] };
 let _cachedRecurring = []; // Optimistic local cache for instant UI updates
+let sessionTemplates = [];
+let selectedRecurringDays = [];
+let editRecurringDays = [];
+let editingRecurringId = null;
+let editingRecurringGroups = new Set();
+let trackingRange = "today";
+let activeStartFlow = "now";
+let trackingData = null;
 
 let pickerState = {
   targetInput: null,
@@ -113,11 +129,25 @@ const els = {
   recurringSchedulesList: $("#recurringSchedulesList"),
   recurringSchedulesCount: $("#recurringSchedulesCount"),
   recurringDays: $("#recurringDays"),
+  recurringName: $("#recurringName"),
   recurringTime: $("#recurringTime"),
+  recurringSetupSummary: $("#recurringSetupSummary"),
   btnAddRecurring: $("#btnAddRecurring"),
-  rescueCard: $("#rescueCard"),
-  rescueDuration: $("#rescueDuration"),
-  btnRescue: $("#btnRescue"),
+  recurringEditModal: $("#recurringEditModal"),
+  recurringEditName: $("#recurringEditName"),
+  recurringEditTime: $("#recurringEditTime"),
+  recurringEditDuration: $("#recurringEditDuration"),
+  recurringEditMode: $("#recurringEditMode"),
+  recurringEditType: $("#recurringEditType"),
+  recurringEditFocus: $("#recurringEditFocus"),
+  recurringEditBreak: $("#recurringEditBreak"),
+  recurringEditCycles: $("#recurringEditCycles"),
+  recurringEditGroups: $("#recurringEditGroups"),
+  recurringEditEnabled: $("#recurringEditEnabled"),
+  recurringEditDays: $("#recurringEditDays"),
+  btnCancelRecurringEdit: $("#btnCancelRecurringEdit"),
+  btnSaveRecurringEdit: $("#btnSaveRecurringEdit"),
+
   sessionGroups: $("#sessionGroups"),
   permaBlockInput: $("#permaBlockInput"),
   permaBlockDomains: $("#permaBlockDomains"),
@@ -125,6 +155,18 @@ const els = {
   permaUnblockModal: $("#permaUnblockModal"),
   permaUnblockInput: $("#permaUnblockInput"),
   permaUnblockError: $("#permaUnblockError"),
+  templatesList: $("#templatesList"),
+  templatesCount: $("#templatesCount"),
+  mbTemplatesList: $("#mbTemplatesList"),
+  mbTemplatesCount: $("#mbTemplatesCount"),
+  btnSaveTemplate: $("#btnSaveTemplate"),
+  templateModal: $("#templateModal"),
+  templateNameInput: $("#templateNameInput"),
+  templateIntentInput: $("#templateIntentInput"),
+  btnCancelTemplate: $("#btnCancelTemplate"),
+  btnConfirmTemplate: $("#btnConfirmTemplate"),
+  notificationFallback: $("#notificationFallback"),
+  scheduleSetupSummary: $("#scheduleSetupSummary"),
 };
 
 // ── API Helpers ──────────────────────────────────────────────────────────────
@@ -133,43 +175,48 @@ const activeRequests = new Map();
 
 async function api(method, path, body = null) {
   const headers = { "Content-Type": "application/json" };
-  // Include API token for mutation requests (POST, DELETE)
-  if (method !== "GET" && apiToken) {
+  if (apiToken) {
     headers["X-API-Token"] = apiToken;
   }
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
   // Flow Reliability: Prevent GET request race conditions and overlap
-  let requestKey = method + ":" + (path || "");
+  const requestKey = method + ":" + (path || "");
+  let controller = null;
   if (method === "GET") {
     if (activeRequests.has(requestKey)) {
       activeRequests.get(requestKey).abort();
     }
-    const controller = new AbortController();
+    controller = new AbortController();
     opts.signal = controller.signal;
     activeRequests.set(requestKey, controller);
   }
   try {
     const res = await fetch(API + path, opts);
     // S4: Auto-refresh token on 401 (daemon restarted)
-    if (res.status === 401 && method !== "GET") {
+    if (res.status === 401) {
       await loadApiToken();
-      headers["X-API-Token"] = apiToken;
+      if (apiToken) headers["X-API-Token"] = apiToken;
       const retry = await fetch(API + path, {
         method,
         headers,
         body: opts.body,
+        signal: AbortSignal.timeout(5000), // WB1: Prevent indefinite hang on retry
       });
       return await retry.json();
     }
-    const data = await res.json();
-    if (method === "GET") activeRequests.delete(requestKey);
-    return data;
+    return await res.json();
   } catch (err) {
-    if (err.name === "AbortError") return new Promise(() => {}); // Never resolves if aborted
+    if (err.name === "AbortError") {
+      return { status: "aborted", message: "Request superseded." };
+    }
     console.error("API Error:", err);
     return { status: "error", message: "Communication failed." };
+  } finally {
+    if (method === "GET" && activeRequests.get(requestKey) === controller) {
+      activeRequests.delete(requestKey);
+    }
   }
 }
 
@@ -195,71 +242,150 @@ function showToast(msg, duration = 3000) {
 
 
 
-function updateTimerDisplay(remMs, isInitial = false) {
-  const remSecs = Math.max(0, Math.ceil(remMs / 1000));
-  els.timerValue.textContent = formatTime(remSecs);
+function setTimerProgress(progress) {
+  const normalized = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
+  els.timerProgress.style.strokeDasharray = `${TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`;
+  els.timerProgress.style.strokeDashoffset = TIMER_CIRCUMFERENCE * (1 - normalized);
+}
 
-  // Update progress ring (Clockwise fill)
-  const circ = 565.48; // 2 * Math.PI * 90
+function updateTimerDisplay(remMs) {
+  // Update progress ring (clockwise fill).
   const totalMs = totalSessionSeconds * 1000;
   const prog = totalMs > 0 ? 1 - remMs / totalMs : 0;
+  setTimerProgress(prog);
+}
 
-  if (isInitial) els.timerProgress.style.transition = "none";
-  els.timerProgress.style.strokeDasharray = `${Math.max(0, Math.min(1, prog)) * circ} ${circ}`;
-  els.timerProgress.style.strokeDashoffset = 0;
-  if (isInitial) {
-    els.timerProgress.offsetHeight; // force reflow
-    els.timerProgress.style.transition = "";
+function scheduleCountdownRefresh() {
+  if (countdownRefreshTimeout) return;
+  countdownRefreshTimeout = setTimeout(() => {
+    countdownRefreshTimeout = null;
+    refreshStatus();
+  }, 150);
+}
+
+function cancelCountdownFrame() {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
   }
 }
 
-function startCountdown(remainingSeconds) {
-  if (countdownInterval && Math.abs(currentRemaining - remainingSeconds) <= 2)
+function startCountdown(remainingSeconds, signature = "timer") {
+  const normalizedRemaining = Math.max(0, Number(remainingSeconds) || 0);
+  const normalizedTotal = Math.max(0, Number(totalSessionSeconds) || 0);
+  const nextSignature = `${signature}:${normalizedTotal}`;
+  if (
+    animationFrameId &&
+    countdownSignature === nextSignature &&
+    Math.abs(currentRemaining - normalizedRemaining) <= 2
+  ) {
     return;
-  if (countdownInterval) clearInterval(countdownInterval);
+  }
+  cancelCountdownFrame();
+  countdownSignature = nextSignature;
 
-  const startTime = Date.now();
-  const durationMs = remainingSeconds * 1000;
+  const startTime = performance.now();
+  const durationMs = normalizedRemaining * 1000;
   const endTime = startTime + durationMs;
-  currentRemaining = remainingSeconds;
+  currentRemaining = normalizedRemaining;
 
-  let isFirst = true;
+  let lastSecs = -1;
+
   const tick = () => {
-    const now = Date.now();
+    const now = performance.now();
     const remMs = endTime - now;
 
     if (remMs <= 0) {
-      clearInterval(countdownInterval);
-      countdownInterval = null;
+      animationFrameId = null;
+      countdownSignature = "";
+      currentRemaining = 0;
+      els.timerValue.textContent = formatTime(0);
       updateTimerDisplay(0);
-      refreshStatus();
+      scheduleCountdownRefresh();
       return;
     }
 
-    currentRemaining = Math.ceil(remMs / 1000);
-    updateTimerDisplay(remMs, isFirst);
-    isFirst = false;
+    const remSecs = Math.ceil(remMs / 1000);
+    currentRemaining = remSecs;
+    
+    // Only update text when second changes
+    if (remSecs !== lastSecs) {
+      els.timerValue.textContent = formatTime(remSecs);
+      lastSecs = remSecs;
+    }
+    
+    updateTimerDisplay(remMs);
+    animationFrameId = requestAnimationFrame(tick);
   };
 
   tick();
-  countdownInterval = setInterval(tick, 100); // 10fps for buttery smooth movement
 }
 
 function stopCountdown() {
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
+  cancelCountdownFrame();
+  countdownSignature = "";
+  currentRemaining = 0;
+  if (countdownRefreshTimeout) {
+    clearTimeout(countdownRefreshTimeout);
+    countdownRefreshTimeout = null;
   }
-  updateTimerDisplay(0);
-  els.timerProgress.style.strokeDashoffset = 565.48;
+  setTimerProgress(0);
 }
 
 let isStarting = false;
+let isSessionActive = false;
+
+function ensureSessionHint(card, text) {
+  if (!card) return null;
+  let hint = card.querySelector(".session-next-hint");
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.className = "session-next-hint hidden";
+    card.appendChild(hint);
+  }
+  hint.textContent = text;
+  return hint;
+}
+
+function setActiveControlAvailability(isFullyActive) {
+  isSessionActive = Boolean(isFullyActive);
+
+  [els.modeCard, els.sessionSettingsCard, els.scheduleCard].forEach((card) => {
+    if (card) card.classList.remove("disabled");
+  });
+
+  const modeHint = ensureSessionHint(els.modeCard, "Changes here apply to your next focus session.");
+  const settingsHint = ensureSessionHint(els.sessionSettingsCard, "Duration and Pomodoro edits apply to the next session.");
+  const scheduleHint = ensureSessionHint(els.scheduleCard, "You can still prepare future schedules while focusing.");
+
+  [modeHint, settingsHint, scheduleHint].forEach((hint) => {
+    if (hint) hint.classList.toggle("hidden", !isFullyActive);
+  });
+}
+
+function renderNotificationFallback(warning) {
+  if (!els.notificationFallback) return;
+  if (!warning || !warning.message) {
+    els.notificationFallback.classList.add("hidden");
+    els.notificationFallback.textContent = "";
+    return;
+  }
+  els.notificationFallback.textContent = warning.message;
+  els.notificationFallback.classList.remove("hidden");
+}
 
 // ── UI State ─────────────────────────────────────────────────────────────────
 
 function setActiveUI(status) {
   if (isStarting) return;
+  renderPrayerCard(status.prayer);
+  renderNotificationFallback(status.notification_warning);
+
+  const prayerActive = status.prayer && status.prayer.prayer_active;
+  if (prayerActive && !lastPrayerState) {
+    AudioManager.play("prayer");
+  }
+  lastPrayerState = !!prayerActive;
 
   const active = status.active;
   const schedules = status.schedules || [];
@@ -312,15 +438,20 @@ function setActiveUI(status) {
   // Timer ring
   els.timerRing.classList.toggle("active", isFullyActive || isPrimaryScheduled);
 
-  // Mode & duration cards
-  els.modeCard.classList.toggle("disabled", isFullyActive);
-  els.sessionSettingsCard.classList.toggle("disabled", isFullyActive);
-  els.scheduleCard.classList.toggle("disabled", isFullyActive);
-  els.rescueCard.classList.toggle("disabled", isFullyActive);
+  setActiveControlAvailability(isFullyActive);
 
   // Start/stop buttons
   els.btnStart.classList.toggle("hidden", isFullyActive);
-  els.btnStop.classList.toggle("hidden", !isFullyActive);
+  els.btnStop.classList.toggle("hidden", !isFullyActive || status.session_type === "prayer");
+  
+  const btnScheduleAdd = document.getElementById("btnScheduleAdd");
+  if (btnScheduleAdd) {
+    if (scheduleType === "now") {
+      btnScheduleAdd.textContent = isFullyActive ? "Merge with Active" : "Start Session";
+    } else {
+      btnScheduleAdd.textContent = "Add Schedule";
+    }
+  }
 
   // Update Upcoming Schedules List (P2: skip if data unchanged)
   if (hasSchedules) {
@@ -426,23 +557,7 @@ function setActiveUI(status) {
     } // P2: end scheduleJSON changed block
     
     // Update live countdowns
-    $$(".cal-duration").forEach(el => {
-      const startMs = el.dataset.startMs;
-      if (startMs) {
-        const remSecs = Math.max(0, Math.floor((parseInt(startMs) - Date.now()) / 1000));
-        el.textContent = "⏳ " + formatTime(remSecs);
-        
-        // Disable cancel button if within 20 mins
-        if (remSecs <= 20 * 60) {
-          const btn = el.parentElement.parentElement.querySelector(".perma-cancel-btn");
-          if (btn && !btn.disabled) {
-            btn.disabled = true;
-            btn.textContent = "Locked";
-            btn.title = "Cannot cancel schedules within 20 minutes of starting.";
-          }
-        }
-      }
-    });
+    updateLiveCountdowns();
   } else {
     els.upcomingSchedulesCard.classList.add("hidden");
     if (_lastScheduleJSON !== "") {
@@ -482,6 +597,8 @@ function setActiveUI(status) {
     // Mode & expires info
     if (status.session_type === "rescue") {
       els.modeDisplay.textContent = `Mode: Rescue Throne 🛡️`;
+    } else if (status.session_type === "prayer") {
+      els.modeDisplay.textContent = `Mode: Prayer Time 🕌`;
     } else {
       els.modeDisplay.textContent = `Mode: ${status.mode}`;
     }
@@ -506,7 +623,10 @@ function setActiveUI(status) {
       els.timerLabel.textContent = status.pomo_phase.toUpperCase();
 
       totalSessionSeconds = status.pomo_phase_total || 1;
-      startCountdown(status.pomo_phase_remaining || 0);
+      startCountdown(
+        status.pomo_phase_remaining || 0,
+        `pomo:${status.pomo_phase}:${status.pomo_current_cycle || 0}`,
+      );
     } else {
       els.pomoStatus.classList.add("hidden");
       els.timerRing.classList.remove("break");
@@ -514,7 +634,10 @@ function setActiveUI(status) {
 
       totalSessionSeconds =
         status.total_duration_seconds || status.remaining_seconds;
-      startCountdown(status.remaining_seconds);
+      startCountdown(
+        status.remaining_seconds,
+        `active:${status.session_type || "standard"}:${status.expires_at || ""}`,
+      );
     }
 
     // Handle pending unlock box
@@ -550,7 +673,7 @@ function setActiveUI(status) {
       els.timerLabel.textContent = "STARTING IN";
       els.statusBadge.classList.remove("pulse");
       totalSessionSeconds = 0; // disables progress ring animation
-      startCountdown(secs);
+      startCountdown(secs, `scheduled:${nextSch.start_time_iso || ""}`);
     }
   } else {
     // Idle state
@@ -570,7 +693,230 @@ function setActiveUI(status) {
   }
 }
 
-// ── Render Recurring Schedules List (standalone for optimistic updates) ───────
+// ── Prayer Rescue Mode ────────────────────────────────────────────────────────
+
+function renderPrayerCard(prayer) {
+    const card = document.getElementById('prayerCard');
+    if (!card) return;
+    
+    if (!prayer || !prayer.enabled) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+    
+    const nameEl = document.getElementById('prayerNextName');
+    const countdownEl = document.getElementById('prayerCountdown');
+    const skipBtn = document.getElementById('btnSkipPrayer');
+    const unskipBtn = document.getElementById('btnUnskipPrayer');
+    const lockWarn = document.getElementById('prayerLockWarning');
+    const activeBanner = document.getElementById('prayerActiveBanner');
+    const activeTimer = document.getElementById('prayerActiveTimer');
+    const gridEl = document.getElementById('prayerTimesGrid');
+    const offlineMsg = document.getElementById('prayerOfflineMsg');
+    
+    // Handle cold start (no data available)
+    if (!prayer.available) {
+        offlineMsg.classList.remove('hidden');
+        gridEl.style.display = 'none';
+        nameEl.textContent = 'Prayer Times';
+        countdownEl.textContent = '--:--:--';
+        skipBtn.style.display = 'none';
+        if (unskipBtn) unskipBtn.classList.add('hidden');
+        lockWarn.classList.add('hidden');
+        activeBanner.classList.add('hidden');
+        return;
+    }
+    
+    offlineMsg.classList.add('hidden');
+    gridEl.style.display = '';
+    
+    // Store data for local live countdown
+    lastPrayerData = prayer;
+    
+    // Only update local target Ms if discrepancy > 2000ms to prevent jitter/stutter
+    const newActiveTarget = prayer.prayer_active ? Date.now() + (prayer.prayer_remaining_seconds * 1000) : 0;
+    if (!localPrayerActiveTargetMs || Math.abs(localPrayerActiveTargetMs - newActiveTarget) > 2000) {
+        localPrayerActiveTargetMs = newActiveTarget;
+    }
+    
+    const newTarget = (!prayer.prayer_active && prayer.next_prayer_seconds) ? Date.now() + (prayer.next_prayer_seconds * 1000) : 0;
+    if (!localPrayerTargetMs || Math.abs(localPrayerTargetMs - newTarget) > 2000) {
+        localPrayerTargetMs = newTarget;
+    }
+    
+    // Active prayer banner
+    if (prayer.prayer_active) {
+        activeBanner.classList.remove('hidden');
+        skipBtn.style.display = 'none';
+        if (unskipBtn) unskipBtn.classList.add('hidden');
+        lockWarn.classList.add('hidden');
+        nameEl.textContent = prayer.current_prayer + ' (Active)';
+        countdownEl.textContent = '';
+        // activeTimer.textContent will be continuously managed by updateLiveCountdowns()
+    } else {
+        activeBanner.classList.add('hidden');
+        
+        if (unskipBtn) {
+            if (prayer.last_skipped_prayer) {
+                unskipBtn.classList.remove('hidden');
+                unskipBtn.title = `Undo skipping ${prayer.last_skipped_prayer}`;
+            } else {
+                unskipBtn.classList.add('hidden');
+            }
+        }
+        
+        if (prayer.next_prayer_name) {
+            nameEl.textContent = prayer.next_prayer_name;
+            // countdownEl.textContent will be continuously managed by updateLiveCountdowns()
+            
+            // Skip button logic
+            if (prayer.can_skip) {
+                skipBtn.style.display = '';
+                lockWarn.classList.add('hidden');
+            } else {
+                skipBtn.style.display = 'none';
+                if (prayer.next_prayer_seconds <= 1800) {
+                    lockWarn.classList.remove('hidden');
+                } else {
+                    lockWarn.classList.add('hidden');
+                }
+            }
+        } else {
+            nameEl.textContent = 'All Prayers Complete';
+            countdownEl.textContent = '✓';
+            skipBtn.style.display = 'none';
+            lockWarn.classList.add('hidden');
+        }
+    }
+    
+    // Render 5-prayer grid
+    const prayers = prayer.today_prayers || {};
+    const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+    const skipped = new Set(prayer.skipped || []);
+    
+    gridEl.innerHTML = prayerNames.map(name => {
+        const time = prayers[name] || '--:--';
+        let cls = 'prayer-time-cell';
+        if (skipped.has(name)) cls += ' skipped';
+        else if (prayer.prayer_active && prayer.current_prayer === name) cls += ' active';
+        else if (prayer.next_prayer_name === name) cls += ' next';
+        else if (prayers[name] && isPassed(prayers[name])) cls += ' passed';
+        
+        return `<div class="${cls}">
+            <span class="prayer-time-label">${name}</span>
+            <span class="prayer-time-value">${time}</span>
+        </div>`;
+    }).join('');
+}
+
+
+function isPassed(timeStr) {
+    const [h, m] = timeStr.split(':').map(Number);
+    const now = new Date();
+    return now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m);
+}
+
+// ── Recurring Schedules UI ───────────────────────────────────────────────────
+
+const recurringDayOrder = [5, 6, 0, 1, 2, 3, 4];
+const recurringDayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function sortedRecurringDays(days = []) {
+  return days
+    .slice()
+    .sort((a, b) => recurringDayOrder.indexOf(a) - recurringDayOrder.indexOf(b));
+}
+
+function formatRecurringDayList(days = []) {
+  const sortedDays = sortedRecurringDays(days);
+  if (sortedDays.length === 7) return "Every day";
+  if (sortedDays.length === 0) return "No days";
+  return sortedDays.map((day) => recurringDayLabels[day] || "").filter(Boolean).join(", ");
+}
+
+function modeLabel(mode) {
+  return mode === "whitelist" ? "Whitelist" : "Blacklist";
+}
+
+function typeLabel(type) {
+  if (type === "pomodoro") return "Pomodoro";
+  if (type === "rescue") return "Rescue";
+  return "Standard";
+}
+
+function currentRecurringDuration() {
+  if (sessionType === "pomodoro") {
+    return (pomoFocusMin + pomoBreakMin) * pomoCycles;
+  }
+  return selectedDuration;
+}
+
+function updateRecurringSetupSummary() {
+  if (!els.recurringSetupSummary) return;
+  const daysText = selectedRecurringDays.length ? formatRecurringDayList(selectedRecurringDays) : "Choose days";
+  const timeText = (els.recurringTime && els.recurringTime.dataset && els.recurringTime.dataset.value) || (els.recurringTime && els.recurringTime.value) || "Choose time";
+  const groups = Array.from(selectedGroups);
+  const groupText = groups.length ? groups.join(", ") : "No groups";
+  const details = [
+    `${daysText} at ${timeText}`,
+    `${currentRecurringDuration()}m`,
+    modeLabel(currentMode),
+    typeLabel(sessionType),
+    groupText,
+  ];
+  els.recurringSetupSummary.textContent = details.join(" · ");
+}
+
+function updateScheduleSetupSummary() {
+  if (!els.scheduleSetupSummary) return;
+  const tempFlow = activeStartFlow; 
+  activeStartFlow = scheduleType; // force it so computeBlockDetails sees the correct schedule type
+  const details = computeBlockDetails();
+  activeStartFlow = tempFlow;
+  
+  els.scheduleSetupSummary.textContent = `${details.sessionType} · ${details.blockType} · ${details.durationText} · ${details.groupText} · ${details.expiryText}`;
+}
+
+function updateSetupSummaries() {
+  updateRecurringSetupSummary();
+  updateScheduleSetupSummary();
+}
+
+function setRecurringDayButtons(container, selectedDays) {
+  if (!container) return;
+  container.querySelectorAll(".day-btn").forEach((btn) => {
+    const day = parseInt(btn.dataset.day, 10);
+    btn.classList.toggle("active", selectedDays.includes(day));
+  });
+}
+
+function createRecurringChip(text, className = "") {
+  const chip = document.createElement("span");
+  chip.className = `recurring-chip${className ? ` ${className}` : ""}`;
+  chip.textContent = text;
+  return chip;
+}
+
+function buildRecurringPayloadFromCurrent() {
+  const payload = {
+    name: (els.recurringName && els.recurringName.value).trim() || "Focus Ritual",
+    days_of_week: selectedRecurringDays,
+    start_time: els.recurringTime.dataset.value || els.recurringTime.value,
+    duration_minutes: currentRecurringDuration(),
+    mode: currentMode,
+    session_type: sessionType,
+    groups: Array.from(selectedGroups),
+  };
+
+  if (sessionType === "pomodoro") {
+    payload.focus_minutes = pomoFocusMin;
+    payload.break_minutes = pomoBreakMin;
+    payload.cycles = pomoCycles;
+  }
+
+  return payload;
+}
 
 function renderRecurringList(recurring) {
   if (!els.recurringSchedulesCount) return;
@@ -579,74 +925,676 @@ function renderRecurringList(recurring) {
 
   if (recurring.length === 0) {
     if (els.recurringSchedulesCard) els.recurringSchedulesCard.classList.remove("hidden");
+    const empty = document.createElement("li");
+    empty.className = "empty-list";
+    empty.textContent = "No recurring focus rituals yet.";
+    els.recurringSchedulesList.appendChild(empty);
     return;
   }
   if (els.recurringSchedulesCard) els.recurringSchedulesCard.classList.remove("hidden");
 
-  // Display order: Sat(5), Sun(6), Mon(0), Tue(1), Wed(2), Thu(3), Fri(4)
-  const dayOrder = [5, 6, 0, 1, 2, 3, 4];
-  const daysArr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
   recurring.forEach((sch) => {
     const li = document.createElement("li");
-    li.className = "recurring-item";
-
-    const calDate = document.createElement("div");
-    calDate.className = "cal-date";
-    const calMonth = document.createElement("span");
-    calMonth.className = "cal-month";
-    calMonth.textContent = "🔁";
-    calMonth.style.fontSize = "18px";
-    calDate.appendChild(calMonth);
+    li.className = `recurring-item${sch.enabled === false ? " paused" : ""}`;
 
     const calDetails = document.createElement("div");
     calDetails.className = "cal-details";
 
-    const calTime = document.createElement("div");
-    calTime.className = "cal-time";
-    calTime.textContent = String(sch.start_time || "");
+    const top = document.createElement("div");
+    top.className = "recurring-rule-top";
 
-    const calTitle = document.createElement("div");
-    calTitle.className = "cal-title";
-    // Sort days by Sat→Fri order for display
-    const sortedDays = (sch.days_of_week || []).slice().sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
-    const daysStr = sortedDays.map(d => daysArr[d]).join(", ");
-    calTitle.textContent = daysStr;
+    const name = document.createElement("div");
+    name.className = "recurring-rule-name";
+    name.textContent = sch.name || "Focus Ritual";
 
-    const calMeta = document.createElement("div");
-    calMeta.className = "cal-duration";
-    const modeLabel = (sch.mode === "whitelist") ? "🛡️ Whitelist" : "🚫 Blacklist";
-    let typeLabel = "";
-    if (sch.session_type === "pomodoro") {
-      const focus = sch.focus_minutes || 25;
-      const breakMin = sch.break_minutes || 5;
-      const cycles = sch.cycles || 4;
-      typeLabel = ` · 🍅 Pomodoro (${focus}m/${breakMin}m × ${cycles})`;
-    }
-    let groupsLabel = "";
-    if (sch.groups && sch.groups.length > 0) {
-      groupsLabel = ` · 🏷️ ${sch.groups.join(", ")}`;
-    }
-    calMeta.textContent = `⏳ ${sch.duration_minutes || 0}m · ${modeLabel}${typeLabel}${groupsLabel}`;
+    const state = document.createElement("span");
+    state.className = `recurring-state-badge${sch.enabled === false ? " paused" : ""}`;
+    state.textContent = sch.enabled === false ? "Paused" : "Active";
 
-    calDetails.appendChild(calTime);
-    calDetails.appendChild(calTitle);
-    calDetails.appendChild(calMeta);
+    top.appendChild(name);
+    top.appendChild(state);
 
-    const cancelBtn = document.createElement("button");
-    cancelBtn.className = "recurring-remove";
-    cancelBtn.innerHTML = "×";
-    cancelBtn.title = "Remove";
-    cancelBtn.addEventListener("click", () => {
-      if (window.removeRecurringSchedule) window.removeRecurringSchedule(sch.id);
+    const dayChips = document.createElement("div");
+    dayChips.className = "recurring-day-chips";
+    sortedRecurringDays(sch.days_of_week || []).forEach((day) => {
+      dayChips.appendChild(createRecurringChip(recurringDayLabels[day], "day-active"));
     });
 
-    li.appendChild(calDate);
+    const metaChips = document.createElement("div");
+    metaChips.className = "recurring-meta-chips";
+    metaChips.appendChild(createRecurringChip(`Next: ${sch.next_run_label || "Paused"}`));
+    metaChips.appendChild(createRecurringChip(`Time: ${sch.start_time || "--:--"}`));
+    metaChips.appendChild(createRecurringChip(`${sch.duration_minutes || 0}m`));
+    metaChips.appendChild(createRecurringChip(modeLabel(sch.mode)));
+    metaChips.appendChild(createRecurringChip(typeLabel(sch.session_type)));
+    if (sch.session_type === "pomodoro") {
+      metaChips.appendChild(createRecurringChip(`${sch.focus_minutes || 25}/${sch.break_minutes || 5} x ${sch.cycles || 4}`));
+    }
+    if (sch.groups && sch.groups.length) {
+      metaChips.appendChild(createRecurringChip(sch.groups.join(", ")));
+    }
+    if (sch.last_result) {
+      metaChips.appendChild(createRecurringChip(`Last: ${sch.last_result}`));
+    }
+
+    calDetails.appendChild(top);
+    calDetails.appendChild(dayChips);
+    calDetails.appendChild(metaChips);
+
+    const actions = document.createElement("div");
+    actions.className = "recurring-actions";
+    actions.dataset.id = sch.id;
+    actions.dataset.nextRunAt = sch.next_run_at || "";
+    actions.dataset.enabled = sch.enabled !== false;
+
+    let isLocked = false;
+    if (sch.enabled !== false && sch.next_run_at) {
+      const nextRunDate = new Date(sch.next_run_at);
+      const diffMinutes = (nextRunDate.getTime() - Date.now()) / 60000;
+      if (diffMinutes <= 20 && diffMinutes > -5) {
+        isLocked = true;
+      }
+    }
+
+    if (isLocked) {
+      const lockedBtn = document.createElement("button");
+      lockedBtn.className = "recurring-action locked-btn";
+      lockedBtn.textContent = "🔒 Locked";
+      lockedBtn.disabled = true;
+      lockedBtn.style.cursor = "not-allowed";
+      lockedBtn.style.opacity = "0.7";
+      lockedBtn.style.color = "var(--text-muted)";
+      actions.appendChild(lockedBtn);
+    } else {
+      const toggleBtn = document.createElement("button");
+      toggleBtn.className = "recurring-action";
+      toggleBtn.textContent = sch.enabled === false ? "Resume" : "Pause";
+      toggleBtn.setAttribute("aria-label", `${toggleBtn.textContent} ${sch.name || "recurring schedule"}`);
+      toggleBtn.addEventListener("click", () => toggleRecurringSchedule(sch.id, sch.enabled === false));
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "recurring-action";
+      editBtn.textContent = "Edit";
+      editBtn.setAttribute("aria-label", `Edit ${sch.name || "recurring schedule"}`);
+      editBtn.addEventListener("click", () => openRecurringEditModal(sch));
+
+      const duplicateBtn = document.createElement("button");
+      duplicateBtn.className = "recurring-action";
+      duplicateBtn.textContent = "Duplicate";
+      duplicateBtn.setAttribute("aria-label", `Duplicate ${sch.name || "recurring schedule"}`);
+      duplicateBtn.addEventListener("click", () => duplicateRecurringSchedule(sch.id));
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "recurring-action danger";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.setAttribute("aria-label", `Delete ${sch.name || "recurring schedule"}`);
+      deleteBtn.addEventListener("click", () => removeRecurringSchedule(sch.id));
+
+      actions.appendChild(toggleBtn);
+      actions.appendChild(editBtn);
+      actions.appendChild(duplicateBtn);
+      actions.appendChild(deleteBtn);
+    }
+
     li.appendChild(calDetails);
-    li.appendChild(cancelBtn);
+    li.appendChild(actions);
 
     els.recurringSchedulesList.appendChild(li);
   });
+}
+
+function syncRecurringCache(rule) {
+  const index = _cachedRecurring.findIndex((item) => item.id === rule.id);
+  if (index >= 0) {
+    _cachedRecurring[index] = rule;
+  } else {
+    _cachedRecurring.push(rule);
+  }
+  _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+  renderRecurringList(_cachedRecurring);
+}
+
+async function toggleRecurringSchedule(id, shouldEnable) {
+  // Optimistic UI update
+  const index = _cachedRecurring.findIndex((item) => item.id === id);
+  let previousState = null;
+  if (index >= 0) {
+    previousState = JSON.parse(JSON.stringify(_cachedRecurring[index]));
+    _cachedRecurring[index].enabled = shouldEnable;
+    _cachedRecurring[index].next_run_label = shouldEnable ? "Loading..." : "Paused";
+    _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+    renderRecurringList(_cachedRecurring);
+  }
+
+  const endpoint = shouldEnable ? "resume" : "pause";
+  const res = await api("POST", `/api/schedules/recurring/${encodeURIComponent(id)}/${endpoint}`, {});
+  if (res.status === "ok") {
+    if (res.rule) syncRecurringCache(res.rule);
+    showToast(shouldEnable ? "Recurring schedule resumed." : "Recurring schedule paused.");
+    await refreshStatus();
+  } else {
+    if (index >= 0 && previousState) {
+      _cachedRecurring[index] = previousState;
+      _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+      renderRecurringList(_cachedRecurring);
+    }
+    showToast(`Error: ${res.message || "Failed to update schedule"}`);
+    refreshStatus();
+  }
+}
+
+async function duplicateRecurringSchedule(id) {
+  // Show an optimistic loading state by duplicating the rule locally (disabled temporarily)
+  const index = _cachedRecurring.findIndex((item) => item.id === id);
+  let tempId = null;
+  if (index >= 0) {
+    const clone = JSON.parse(JSON.stringify(_cachedRecurring[index]));
+    tempId = "temp-" + Date.now();
+    clone.id = tempId;
+    clone.name = clone.name + " (Copy)";
+    clone.enabled = false;
+    _cachedRecurring.push(clone);
+    _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+    renderRecurringList(_cachedRecurring);
+  }
+
+  const res = await api("POST", `/api/schedules/recurring/${encodeURIComponent(id)}/duplicate`, {});
+  if (res.status === "ok") {
+    // Remove the temp clone since syncRecurringCache will add the real one
+    if (tempId) {
+      _cachedRecurring = _cachedRecurring.filter(r => r.id !== tempId);
+    }
+    if (res.rule) syncRecurringCache(res.rule);
+    showToast("Recurring schedule duplicated.");
+    await refreshStatus();
+  } else {
+    if (tempId) {
+      _cachedRecurring = _cachedRecurring.filter(r => r.id !== tempId);
+      _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+      renderRecurringList(_cachedRecurring);
+    }
+    showToast(`Error: ${res.message || "Failed to duplicate schedule"}`);
+    refreshStatus();
+  }
+}
+
+async function removeRecurringSchedule(id) {
+  const previous = _cachedRecurring.slice();
+  _cachedRecurring = _cachedRecurring.filter((rule) => rule.id !== id);
+  _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+  renderRecurringList(_cachedRecurring);
+  try {
+    const res = await api("DELETE", `/api/schedules/recurring/${encodeURIComponent(id)}`);
+    if (res.status === "ok") {
+      showToast("Recurring schedule removed.");
+      await refreshStatus();
+    } else {
+      _cachedRecurring = previous;
+      _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+      renderRecurringList(_cachedRecurring);
+      showToast(`Error: ${res.message || "Failed to remove"}`);
+    }
+  } catch (err) {
+    _cachedRecurring = previous;
+    _lastRecurringJSON = JSON.stringify(_cachedRecurring);
+    renderRecurringList(_cachedRecurring);
+    showToast("Connection failed.");
+  }
+}
+
+function updateEditModalFields() {
+  const type = (els.recurringEditType && els.recurringEditType.value) || "standard";
+  const durationField = document.getElementById("recurringEditDurationField");
+  const modeField = document.getElementById("recurringEditModeField");
+  const focusField = document.getElementById("recurringEditFocusField");
+  const breakField = document.getElementById("recurringEditBreakField");
+  const cyclesField = document.getElementById("recurringEditCyclesField");
+
+  const groupsField = document.getElementById("recurringEditGroups");
+
+  if (type === "pomodoro") {
+    if (durationField) durationField.classList.add("hidden");
+    if (modeField) modeField.classList.remove("hidden");
+    if (focusField) focusField.classList.remove("hidden");
+    if (breakField) breakField.classList.remove("hidden");
+    if (cyclesField) cyclesField.classList.remove("hidden");
+    if (groupsField) groupsField.classList.remove("hidden");
+  } else if (type === "rescue") {
+    if (durationField) durationField.classList.remove("hidden");
+    if (modeField) modeField.classList.add("hidden");
+    if (focusField) focusField.classList.add("hidden");
+    if (breakField) breakField.classList.add("hidden");
+    if (cyclesField) cyclesField.classList.add("hidden");
+    if (groupsField) groupsField.classList.add("hidden");
+    if (els.recurringEditMode) els.recurringEditMode.value = "whitelist";
+  } else {
+    // standard
+    if (durationField) durationField.classList.remove("hidden");
+    if (modeField) modeField.classList.remove("hidden");
+    if (focusField) focusField.classList.add("hidden");
+    if (breakField) breakField.classList.add("hidden");
+    if (cyclesField) cyclesField.classList.add("hidden");
+    if (groupsField) groupsField.classList.remove("hidden");
+  }
+}
+
+function renderRecurringEditGroups() {
+  if (!els.recurringEditGroups) return;
+  
+  if (Object.keys(availableGroups).length === 0) {
+    els.recurringEditGroups.replaceChildren();
+    const emptyMsg = document.createElement("div");
+    emptyMsg.className = "loading-muted";
+    emptyMsg.textContent = "No groups configured.";
+    els.recurringEditGroups.appendChild(emptyMsg);
+    return;
+  }
+
+  els.recurringEditGroups.innerHTML = "";
+  for (const name of Object.keys(availableGroups)) {
+    const btn = document.createElement("button");
+    btn.className = "dur-btn group-chip" + (editingRecurringGroups.has(name) ? " active" : "");
+    btn.dataset.group = name;
+    btn.textContent = name;
+    btn.addEventListener("click", () => {
+      if (editingRecurringGroups.has(name)) {
+        editingRecurringGroups.delete(name);
+        btn.classList.remove("active");
+      } else {
+        editingRecurringGroups.add(name);
+        btn.classList.add("active");
+      }
+    });
+    els.recurringEditGroups.appendChild(btn);
+  }
+}
+
+function openRecurringEditModal(rule) {
+  if (!els.recurringEditModal) return;
+  editingRecurringId = rule.id;
+  editRecurringDays = (rule.days_of_week || []).slice();
+  els.recurringEditName.value = rule.name || "Focus Ritual";
+  
+  const startTime = rule.start_time || "";
+  els.recurringEditTime.value = startTime ? convertToDisplayTime(startTime) : "";
+  els.recurringEditTime.dataset.value = startTime;
+
+  els.recurringEditDuration.value = rule.duration_minutes || 120;
+  els.recurringEditMode.value = rule.mode || "blacklist";
+  els.recurringEditType.value = rule.session_type || "standard";
+  els.recurringEditFocus.value = rule.focus_minutes || 25;
+  els.recurringEditBreak.value = rule.break_minutes || 5;
+  els.recurringEditCycles.value = rule.cycles || 4;
+  
+  editingRecurringGroups = new Set(rule.groups || []);
+  renderRecurringEditGroups();
+  els.recurringEditEnabled.checked = rule.enabled !== false;
+  
+  setRecurringDayButtons(els.recurringEditDays, editRecurringDays);
+  updateEditModalFields();
+
+  els.recurringEditModal.classList.remove("hidden");
+  els.recurringEditName.focus();
+}
+
+function closeRecurringEditModal() {
+  editingRecurringId = null;
+  editRecurringDays = [];
+  editingRecurringGroups.clear();
+  if (els.recurringEditModal) els.recurringEditModal.classList.add("hidden");
+}
+
+async function saveRecurringEdit() {
+  if (!editingRecurringId) return;
+  if (editRecurringDays.length === 0) {
+    showToast("Please select at least one day.");
+    return;
+  }
+  const startTime = (els.recurringEditTime.dataset.value || els.recurringEditTime.value || "").trim();
+  if (!/^\d{1,2}:\d{2}$/.test(startTime)) {
+    showToast("Please use HH:MM time.");
+    return;
+  }
+
+  const type = els.recurringEditType.value;
+  let duration = parseInt(els.recurringEditDuration.value, 10) || 120;
+  const focus = parseInt(els.recurringEditFocus.value, 10) || 25;
+  const breakTime = parseInt(els.recurringEditBreak.value, 10) || 5;
+  const cycles = parseInt(els.recurringEditCycles.value, 10) || 4;
+
+  if (type === "pomodoro") {
+    duration = (focus + breakTime) * cycles;
+  }
+
+  const groups = Array.from(editingRecurringGroups);
+  const payload = {
+    name: els.recurringEditName.value.trim() || "Focus Ritual",
+    days_of_week: editRecurringDays,
+    start_time: startTime,
+    duration_minutes: duration,
+    mode: type === "rescue" ? "whitelist" : els.recurringEditMode.value,
+    session_type: type,
+    focus_minutes: focus,
+    break_minutes: breakTime,
+    cycles: cycles,
+    groups,
+    enabled: els.recurringEditEnabled.checked,
+  };
+
+  const originalText = els.btnSaveRecurringEdit.textContent;
+  els.btnSaveRecurringEdit.textContent = "Saving...";
+  els.btnSaveRecurringEdit.disabled = true;
+  try {
+    const res = await api("POST", `/api/schedules/recurring/${encodeURIComponent(editingRecurringId)}`, payload);
+    if (res.status === "ok") {
+      if (res.rule) syncRecurringCache(res.rule);
+      closeRecurringEditModal();
+      showToast("Recurring schedule updated.");
+      await refreshStatus();
+    } else {
+      showToast(`Error: ${res.message || "Failed to update schedule"}`);
+    }
+  } catch (err) {
+    showToast("Connection failed.");
+  } finally {
+    els.btnSaveRecurringEdit.textContent = originalText;
+    els.btnSaveRecurringEdit.disabled = false;
+  }
+}
+
+// ── Smart Session Templates ──────────────────────────────────────────────────
+
+function currentSessionTemplatePayload(name, intent = "") {
+  let duration = selectedDuration;
+  const payload = {
+    name,
+    mode: currentMode,
+    session_type: sessionType,
+    duration_minutes: duration,
+    groups: Array.from(selectedGroups),
+    intent,
+    intent_tasks: [],
+  };
+
+  if (sessionType === "pomodoro") {
+    duration = (pomoFocusMin + pomoBreakMin) * pomoCycles;
+    payload.duration_minutes = duration;
+    payload.focus_minutes = pomoFocusMin;
+    payload.break_minutes = pomoBreakMin;
+    payload.cycles = pomoCycles;
+  }
+
+  return payload;
+}
+
+function templateDurationLabel(template) {
+  if (template.session_type === "pomodoro") {
+    return `${template.focus_minutes || 25}/${template.break_minutes || 5} × ${template.cycles || 4}`;
+  }
+  return `${template.duration_minutes || 0}m`;
+}
+
+async function refreshTemplates() {
+  if (!els.templatesList) return;
+  const data = await api("GET", "/api/templates");
+  if (data.status !== "ok") return;
+  sessionTemplates = data.templates || [];
+  renderTemplates();
+}
+
+function renderTemplates() {
+  if (els.templatesList) {
+    els.templatesCount.textContent = sessionTemplates.length;
+    els.templatesList.innerHTML = "";
+  }
+  if (els.mbTemplatesList) {
+    els.mbTemplatesCount.textContent = sessionTemplates.length;
+    els.mbTemplatesList.innerHTML = "";
+  }
+
+  if (sessionTemplates.length === 0) {
+    if (els.templatesList) {
+      const empty = document.createElement("div");
+      empty.className = "empty-list";
+      empty.textContent = "No templates saved yet.";
+      els.templatesList.appendChild(empty);
+    }
+    if (els.mbTemplatesList) {
+      const emptyMb = document.createElement("div");
+      emptyMb.className = "empty-list";
+      emptyMb.style.cssText = "font-size: 11px; color: #71717a; text-align: center; padding: 4px 0;";
+      emptyMb.textContent = "No templates saved";
+      els.mbTemplatesList.appendChild(emptyMb);
+    }
+    return;
+  }
+
+  sessionTemplates.forEach((template) => {
+    if (els.templatesList) {
+      const item = document.createElement("div");
+      item.className = "template-item";
+
+      const main = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "template-name";
+      name.textContent = template.name || "Untitled";
+      const meta = document.createElement("div");
+      meta.className = "template-meta";
+
+      const chips = [
+        template.mode === "whitelist" ? "Whitelist" : "Blacklist",
+        template.session_type === "rescue" ? "Rescue" : template.session_type === "pomodoro" ? "Pomodoro" : "Standard",
+        templateDurationLabel(template),
+        (template.groups || []).length ? `Groups: ${(template.groups || []).join(", ")}` : "No groups",
+        `${template.use_count || 0} uses`,
+      ];
+      chips.forEach((value) => {
+        const chip = document.createElement("span");
+        chip.className = "template-chip";
+        chip.textContent = value;
+        meta.appendChild(chip);
+      });
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const buttons = document.createElement("div");
+      buttons.className = "template-buttons";
+
+      const startBtn = document.createElement("button");
+      startBtn.className = "template-start";
+      startBtn.textContent = "Start";
+      startBtn.setAttribute("aria-label", `Start ${template.name || "template"}`);
+      startBtn.addEventListener("click", () => startTemplate(template.id, startBtn));
+
+      const duplicateBtn = document.createElement("button");
+      duplicateBtn.textContent = "Duplicate";
+      duplicateBtn.setAttribute("aria-label", `Duplicate ${template.name || "template"}`);
+      duplicateBtn.addEventListener("click", () => duplicateTemplate(template.id));
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "template-delete";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.setAttribute("aria-label", `Delete ${template.name || "template"}`);
+      deleteBtn.addEventListener("click", () => deleteTemplate(template.id));
+
+      buttons.appendChild(startBtn);
+      buttons.appendChild(duplicateBtn);
+      buttons.appendChild(deleteBtn);
+
+      item.appendChild(main);
+      item.appendChild(buttons);
+      els.templatesList.appendChild(item);
+    }
+
+    if (els.mbTemplatesList) {
+      const mbItem = document.createElement("div");
+      mbItem.style.cssText = "display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: background 0.2s;";
+      
+      const leftCol = document.createElement("div");
+      leftCol.style.cssText = "display: flex; flex-direction: column; gap: 2px;";
+      
+      const title = document.createElement("div");
+      title.style.cssText = "font-size: 12px; font-weight: 500; color: #fff;";
+      title.textContent = template.name || "Untitled";
+      
+      const meta = document.createElement("div");
+      meta.style.cssText = "font-size: 10px; color: #a1a1aa;";
+      meta.textContent = `${templateDurationLabel(template)} • ${template.mode === "whitelist" ? "WL" : "BL"}`;
+      
+      leftCol.appendChild(title);
+      leftCol.appendChild(meta);
+      
+      const startBtn = document.createElement("button");
+      startBtn.textContent = "▶";
+      startBtn.style.cssText = "background: rgba(255,255,255,0.1); border: none; color: white; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px;";
+      
+      mbItem.addEventListener("mouseenter", () => { mbItem.style.background = "rgba(255,255,255,0.1)"; startBtn.style.background = "var(--primary)"; });
+      mbItem.addEventListener("mouseleave", () => { mbItem.style.background = "rgba(255,255,255,0.05)"; startBtn.style.background = "rgba(255,255,255,0.1)"; });
+      
+      mbItem.addEventListener("click", () => {
+        startBtn.textContent = "⌛";
+        startTemplate(template.id, startBtn);
+      });
+      
+      mbItem.appendChild(leftCol);
+      mbItem.appendChild(startBtn);
+      els.mbTemplatesList.appendChild(mbItem);
+    }
+  });
+}
+
+async function saveTemplateFromCurrent() {
+  const name = els.templateNameInput.value.trim();
+  if (!name) {
+    showToast("Template name is required.");
+    return;
+  }
+  const payload = currentSessionTemplatePayload(name, els.templateIntentInput.value.trim());
+  els.btnConfirmTemplate.disabled = true;
+  try {
+    const res = await api("POST", "/api/templates", payload);
+    if (res.status === "ok") {
+      els.templateModal.classList.add("hidden");
+      showToast("Template saved.");
+      await refreshTemplates();
+    } else {
+      showToast(`Error: ${res.message || "Failed to save template"}`);
+    }
+  } finally {
+    els.btnConfirmTemplate.disabled = false;
+  }
+}
+
+function startTemplate(templateId, button) {
+  const template = sessionTemplates.find(t => t.id === templateId);
+  if (!template) return;
+
+  // 1. Set Mode
+  currentMode = template.session_type === "rescue" ? "rescue" : (template.mode || "blacklist");
+  $$(".mode-btn:not(.session-type-btn):not(.schedule-type-btn)").forEach(b => b.classList.remove("active"));
+  const modeBtnId = currentMode === "rescue" ? "#btnRescueMode" : currentMode === "whitelist" ? "#btnWhitelist" : "#btnBlacklist";
+  const modeBtn = $(modeBtnId);
+  if (modeBtn) modeBtn.classList.add("active");
+
+  // Toggle rescue inline settings vs session config cards
+  const isRescue = currentMode === "rescue";
+  const rescueInline = document.getElementById("rescueInlineSettings");
+  if (els.sessionSettingsCard) els.sessionSettingsCard.classList.toggle("hidden", isRescue);
+  if (els.scheduleCard) els.scheduleCard.classList.toggle("hidden", isRescue);
+  if (els.rescueCard) els.rescueCard.classList.toggle("hidden", isRescue);
+  if (rescueInline) rescueInline.classList.toggle("hidden", !isRescue);
+
+  // 2. Set Session Type
+  sessionType = template.session_type || "standard";
+  $$(".session-type-btn").forEach((b) => b.classList.remove("active"));
+  const typeBtn = $(`.session-type-btn[data-type="${sessionType}"]`);
+  if (typeBtn) typeBtn.classList.add("active");
+
+  if (sessionType === "pomodoro") {
+    els.standardSettingsArea.classList.add("hidden");
+    els.pomodoroSettingsArea.classList.remove("hidden");
+    els.sessionSettingsTitle.textContent = "🍅 Pomodoro Settings";
+    
+    els.pomoFocus.value = template.focus_minutes || 25;
+    els.pomoBreak.value = template.break_minutes || 5;
+    els.pomoCycles.value = template.cycles || 4;
+    $$(".pomo-preset").forEach((b) => b.classList.remove("active"));
+    pomoFocusMin = parseInt(els.pomoFocus.value) || 25;
+    pomoBreakMin = parseInt(els.pomoBreak.value) || 5;
+    pomoCycles = parseInt(els.pomoCycles.value) || 4;
+    
+    const total = (pomoFocusMin + pomoBreakMin) * pomoCycles;
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    els.pomoSummary.textContent = `Total: ${h}h ${String(m).padStart(2, "0")}m (${pomoCycles} × ${pomoFocusMin}m focus + ${pomoBreakMin}m break)`;
+  } else if (sessionType === "rescue") {
+    // Rescue duration is now integrated. Do nothing here for inline since it uses standard/pomo
+
+  } else {
+    els.standardSettingsArea.classList.remove("hidden");
+    els.pomodoroSettingsArea.classList.add("hidden");
+    els.sessionSettingsTitle.textContent = "Session Duration";
+
+    selectedDuration = template.duration_minutes || 120;
+    $$(".dur-btn:not(.pomo-preset)").forEach((b) => b.classList.remove("active"));
+    const durBtn = $(`.dur-btn:not(.pomo-preset)[data-minutes="${selectedDuration}"]`);
+    if (durBtn) {
+      durBtn.classList.add("active");
+      els.customMinutes.value = "";
+    } else {
+      els.customMinutes.value = selectedDuration;
+    }
+  }
+
+  // 3. Set Groups
+  selectedGroups.clear();
+  if (template.groups && template.groups.length) {
+    template.groups.forEach(g => selectedGroups.add(g));
+  }
+  renderSessionGroups();
+  
+  // 4. Prefill Intent if any
+  const intentInput = document.getElementById("intentModalInput");
+  if (intentInput) {
+    intentInput.value = template.intent || "";
+  }
+  const intentTasksInput = document.getElementById("intentTasksInput");
+  if (intentTasksInput) {
+    intentTasksInput.value = (template.intent_tasks || []).join("\n");
+  }
+
+  if (typeof updateSetupSummaries === 'function') {
+    updateSetupSummaries();
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (sessionType === "rescue" || currentMode === "rescue") {
+    if (els.btnStart) els.btnStart.focus();
+    showToast("Rescue template loaded. Click 'Start Blocking' to begin.");
+  } else {
+    if (els.btnStart) els.btnStart.focus();
+    showToast("Template loaded. Click 'Start Blocking' to begin.");
+  }
+}
+
+async function duplicateTemplate(templateId) {
+  const res = await api("POST", `/api/templates/${encodeURIComponent(templateId)}/duplicate`, {});
+  if (res.status === "ok") {
+    showToast("Template duplicated.");
+    await refreshTemplates();
+  } else {
+    showToast(`Error: ${res.message || "Failed to duplicate template"}`);
+  }
+}
+
+async function deleteTemplate(templateId) {
+  const res = await api("DELETE", `/api/templates/${encodeURIComponent(templateId)}`);
+  if (res.status === "ok") {
+    showToast("Template deleted.");
+    await refreshTemplates();
+  } else {
+    showToast(`Error: ${res.message || "Failed to delete template"}`);
+  }
 }
 
 // ── Refresh Status ───────────────────────────────────────────────────────────
@@ -657,6 +1605,49 @@ let _lastActiveState = null;
 let _lastScheduleJSON = ""; // P2: Track schedule data to avoid DOM thrash
 let _lastRecurringJSON = "";
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sessionStatusMatchesPayload(status, payload) {
+  if (!status || status.status !== "ok") return false;
+  const expectedType = payload.session_type || "standard";
+  const scheduled = Boolean(payload.schedule_in || payload.schedule_at);
+  if (scheduled) {
+    return (status.schedules || []).some(
+      (schedule) =>
+        schedule.cmd &&
+        schedule.cmd.mode === payload.mode &&
+        schedule.cmd.session_type === expectedType,
+    );
+  }
+  return (
+    status.active === true &&
+    status.mode === payload.mode &&
+    status.session_type === expectedType
+  );
+}
+
+function stopStatusConfirmed(status) {
+  return (
+    status &&
+    status.status === "ok" &&
+    (status.active === false || Boolean(status.pending_unlock))
+  );
+}
+
+async function waitForStatusConfirmation(predicate, attempts = 5, delayMs = 200) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const status = await api("GET", "/api/status");
+    if (predicate(status)) {
+      setActiveUI(status);
+      return status;
+    }
+    if (attempt < attempts - 1) await delay(delayMs);
+  }
+  return null;
+}
+
 async function refreshStatus() {
   const data = await api("GET", "/api/status");
   if (data.status === "ok") {
@@ -664,10 +1655,8 @@ async function refreshStatus() {
     const phaseChanged = data.pomo_phase !== _lastPomoPhase;
     const activeChanged = data.active !== _lastActiveState;
     if (phaseChanged || activeChanged) {
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-      }
+      cancelCountdownFrame();
+      countdownSignature = "";
     }
     _lastPomoPhase = data.pomo_phase || null;
     _lastActiveState = data.active;
@@ -693,14 +1682,7 @@ function renderDomainList(container, domains, listName) {
 
   if (!domains || domains.length === 0) {
     const li = document.createElement("li");
-    li.style.justifyContent = "center";
-    li.style.padding = "16px";
-    li.style.color = "var(--text-muted)";
-    li.style.fontSize = "13px";
-    li.style.fontStyle = "italic";
-    li.style.background = "transparent";
-    li.style.border = "1px dashed var(--border)";
-    li.style.borderRadius = "8px";
+    li.className = "empty-list-item";
     li.textContent = "No domains added yet.";
     container.appendChild(li);
     return;
@@ -759,14 +1741,7 @@ function renderPermaBlocklist(container, domains, pendingUnlocks) {
 
   if (!domains || domains.length === 0) {
     const li = document.createElement("li");
-    li.style.justifyContent = "center";
-    li.style.padding = "16px";
-    li.style.color = "var(--text-muted)";
-    li.style.fontSize = "13px";
-    li.style.fontStyle = "italic";
-    li.style.background = "transparent";
-    li.style.border = "1px dashed var(--border)";
-    li.style.borderRadius = "8px";
+    li.className = "empty-list-item";
     li.textContent = "No permanently blocked domains.";
     container.appendChild(li);
     stopPermaCountdown();
@@ -813,9 +1788,8 @@ function renderPermaBlocklist(container, domains, pendingUnlocks) {
     } else {
       // Locked state
       const lockIcon = document.createElement("span");
+      lockIcon.className = "perma-lock-icon";
       lockIcon.textContent = "\uD83D\uDD12";
-      lockIcon.style.marginRight = "8px";
-      lockIcon.style.fontSize = "11px";
       leftSpan.appendChild(lockIcon);
 
       const nameEl = document.createElement("span");
@@ -956,8 +1930,6 @@ async function cancelSchedule(start_time_iso) {
 
 // ── Intent Tasks ─────────────────────────────────────────────────────────────
 
-
-
 function showRecap(data) {
   const modal = document.getElementById("recapModal");
   const intentDisplay = document.getElementById("recapIntentDisplay");
@@ -1009,9 +1981,109 @@ function showRecap(data) {
   modal.classList.remove("hidden");
 }
 
-document.getElementById("btnContinueRecap")?.addEventListener("click", () => {
+let _btnRecap = document.getElementById("btnContinueRecap"); if (_btnRecap) _btnRecap.addEventListener("click", () => {
   document.getElementById("recapModal").classList.add("hidden");
 });
+
+// ── Event Handlers ───────────────────────────────────────────────────────────
+
+// ── Block Details ────────────────────────────────────────────────────────────
+
+/**
+ * Compute session configuration preview from current local state.
+ * Handles standard, pomodoro, and scheduled session types.
+ * @returns {{ blockType: string, sessionType: string, durationText: string, expiryText: string, domainCount: string }}
+ */
+function computeBlockDetails() {
+  const blockType = currentMode === "rescue" ? "🛡️ Rescue" : currentMode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+  const sessionLabel = currentMode === "rescue" ? "🛡️ Rescue" : sessionType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
+
+  let totalMinutes;
+  let durationText;
+  if (currentMode === "rescue") {
+    const rescueDur = 10; // Fallback, not used but kept for _start_session simulation
+    totalMinutes = rescueDur;
+    durationText = `${rescueDur}m lockdown`;
+  } else if (sessionType === "pomodoro") {
+    totalMinutes = (pomoFocusMin + pomoBreakMin) * pomoCycles;
+    durationText = `${pomoFocusMin}m focus × ${pomoCycles} cycles`;
+  } else {
+    totalMinutes = selectedDuration;
+    const hrs = Math.floor(selectedDuration / 60);
+    const mins = selectedDuration % 60;
+    durationText = hrs > 0 ? `${hrs}h ${mins > 0 ? mins + "m" : ""}`.trim() : `${mins}m`;
+  }
+
+  // Compute expiry based on schedule type
+  let expiryText;
+  if (activeStartFlow === "at") {
+    const atVal = (els.scheduleAt && els.scheduleAt.dataset && els.scheduleAt.dataset.value);
+    expiryText = atVal ? `Scheduled: ${els.scheduleAt.value}` : "—";
+  } else if (activeStartFlow === "in") {
+    const inMin = parseInt((els.scheduleIn && els.scheduleIn.value), 10) || 0;
+    const futureDate = new Date(Date.now() + (inMin + totalMinutes) * 60000);
+    expiryText = formatExpiryTime(futureDate);
+  } else {
+    const expiryDate = new Date(Date.now() + totalMinutes * 60000);
+    expiryText = formatExpiryTime(expiryDate);
+  }
+
+  // Count unique domains from selected groups (or all if none selected)
+  let domainCount = "—";
+  let groupText = "—";
+  try {
+    const groupNames = selectedGroups.size > 0
+      ? Array.from(selectedGroups)
+      : Object.keys(availableGroups);
+      
+    if (selectedGroups.size === 0 && Object.keys(availableGroups).length > 0) {
+      groupText = "All Groups";
+    } else if (groupNames.length > 0) {
+      groupText = groupNames.join(", ");
+    }
+    
+    const uniqueDomains = new Set();
+    for (const name of groupNames) {
+      const domains = availableGroups[name];
+      if (Array.isArray(domains)) {
+        domains.forEach((d) => uniqueDomains.add(d));
+      }
+    }
+    domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
+  } catch {
+    domainCount = "—";
+    groupText = "—";
+  }
+
+  return { blockType, sessionType: sessionLabel, durationText, expiryText, domainCount, groupText };
+}
+
+/** Format a Date as a human-readable expiry time. */
+function formatExpiryTime(date) {
+  let hrs = date.getHours();
+  const mins = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hrs >= 12 ? "PM" : "AM";
+  hrs = hrs % 12 || 12;
+  return `${hrs}:${mins} ${ampm}`;
+}
+
+/** Populate Block Details modal with computed values. */
+function renderBlockDetailsModal(details) {
+  const setEl = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  setEl("wdDetailType", details.blockType);
+  setEl("wdDetailSession", details.sessionType);
+  setEl("wdDetailDuration", details.durationText);
+  setEl("wdDetailExpiry", details.expiryText);
+  setEl("wdDetailGroups", details.groupText);
+  setEl("wdDetailDomains", details.domainCount);
+
+  // Hide error state on fresh render
+  const errorEl = document.getElementById("wdBlockDetailsError");
+  if (errorEl) errorEl.classList.add("hidden");
+}
 
 // ── Event Handlers ───────────────────────────────────────────────────────────
 
@@ -1028,6 +2100,11 @@ function initEvents() {
       const targetId = btn.dataset.tab;
       const targetPane = document.getElementById(targetId);
       if (targetPane) targetPane.classList.add("active");
+
+      // Lazy-load tracking data when Tracking tab is activated
+      if (targetId === "tab-tracking") {
+        refreshTracking(trackingRange);
+      }
     });
   });
 
@@ -1040,6 +2117,9 @@ function initEvents() {
         );
         btn.classList.add("active");
         currentMode = btn.dataset.mode;
+
+        const isRescue = currentMode === "rescue";
+        updateSetupSummaries();
       });
     },
   );
@@ -1061,6 +2141,12 @@ function initEvents() {
         els.scheduleInWrapper.classList.add("hidden");
         els.scheduleAtWrapper.classList.add("hidden");
       }
+      
+      const btnScheduleAdd = document.getElementById("btnScheduleAdd");
+      if (btnScheduleAdd) {
+        btnScheduleAdd.textContent = "Add Schedule";
+      }
+      updateSetupSummaries();
     });
   });
 
@@ -1089,6 +2175,7 @@ function initEvents() {
         els.pomodoroSettingsArea.classList.add("hidden");
         els.sessionSettingsTitle.textContent = "Session Duration";
       }
+      updateSetupSummaries();
     });
   });
 
@@ -1099,6 +2186,7 @@ function initEvents() {
       els.pomoFocus.value = btn.dataset.focus;
       els.pomoBreak.value = btn.dataset.break;
       updatePomoSummary();
+      updateSetupSummaries();
     });
   });
 
@@ -1106,6 +2194,7 @@ function initEvents() {
     el.addEventListener("input", () => {
       $$(".pomo-preset").forEach((b) => b.classList.remove("active"));
       updatePomoSummary();
+      updateSetupSummaries();
     });
   });
 
@@ -1116,47 +2205,144 @@ function initEvents() {
         b.classList.remove("active"),
       );
       btn.classList.add("active");
-      selectedDuration = parseInt(btn.dataset.minutes);
+      selectedDuration = parseInt(btn.dataset.minutes, 10);
       els.customMinutes.value = "";
+      updateSetupSummaries();
     });
   });
 
-  // Custom duration
   els.customMinutes.addEventListener("input", () => {
-    const val = parseInt(els.customMinutes.value);
+    const val = parseInt(els.customMinutes.value, 10);
     if (val > 0) {
       $$(".dur-btn").forEach((b) => b.classList.remove("active"));
       selectedDuration = val;
+      updateSetupSummaries();
     }
   });
 
-  // Start button -> Shows Intent Modal
+  if (els.scheduleIn) {
+    els.scheduleIn.addEventListener("input", updateSetupSummaries);
+  }
+  // For scheduleAt, it might be updated by flatpickr.
+  // We can hook into its change event or flatpickr's onChange.
+  if (els.scheduleAt) {
+    els.scheduleAt.addEventListener("change", updateSetupSummaries);
+    els.scheduleAt.addEventListener("input", updateSetupSummaries);
+  }
+
+  if (els.btnSaveTemplate) {
+    els.btnSaveTemplate.addEventListener("click", () => {
+      els.templateNameInput.value = "";
+      els.templateIntentInput.value = "";
+      els.templateModal.classList.remove("hidden");
+      els.templateNameInput.focus();
+    });
+  }
+
+  if (els.btnCancelTemplate) {
+    els.btnCancelTemplate.addEventListener("click", () => {
+      els.templateModal.classList.add("hidden");
+    });
+  }
+
+  if (els.templateNameInput) {
+    els.templateNameInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveTemplateFromCurrent();
+      }
+    });
+  }
+
+  if (els.btnConfirmTemplate) {
+    els.btnConfirmTemplate.addEventListener("click", saveTemplateFromCurrent);
+  }
+
+  const btnScheduleAdd = document.getElementById("btnScheduleAdd");
+  if (btnScheduleAdd) {
+    btnScheduleAdd.addEventListener("click", () => {
+      activeStartFlow = scheduleType;
+      // Basic validation for schedules before showing modal
+      if (activeStartFlow === "in") {
+        const min = parseInt(els.scheduleIn.value);
+        if (!min || min < 1) {
+          showToast("Please enter a valid number of minutes.");
+          return;
+        }
+      } else if (activeStartFlow === "at") {
+        const time = els.scheduleAt.value;
+        if (!time) {
+          showToast("Please select a valid date and time.");
+          return;
+        }
+      }
+
+      const blockDetailsModal = $("#blockDetailsModal");
+      if (blockDetailsModal) {
+        const details = computeBlockDetails();
+        renderBlockDetailsModal(details);
+        blockDetailsModal.classList.remove("hidden");
+      }
+    });
+  }
+
+  // Start button -> Shows Block Details Modal first
   els.btnStart.addEventListener("click", () => {
+    activeStartFlow = "now";
     // Basic validation before showing modal
-    if (scheduleType === "in") {
-      const min = parseInt(els.scheduleIn.value);
-      if (!min || min < 1) {
-        showToast("Please enter a valid number of minutes.");
-        return;
-      }
-    } else if (scheduleType === "at") {
-      const time = els.scheduleAt.value;
-      if (!time) {
-        showToast("Please select a valid date and time.");
-        return;
-      }
-    }
-
-    const intentModal = $("#intentModal");
-    const intentInput = $("#intentModalInput");
-    const intentTasksInput = $("#intentTasksInput");
-    if (intentModal && intentInput) {
-      intentModal.classList.remove("hidden");
-      intentInput.value = "";
-      if (intentTasksInput) intentTasksInput.value = "";
-      intentInput.focus();
+    const blockDetailsModal = $("#blockDetailsModal");
+    if (blockDetailsModal) {
+      const details = computeBlockDetails();
+      renderBlockDetailsModal(details);
+      blockDetailsModal.classList.remove("hidden");
     }
   });
+
+  // Block Details — Cancel
+  const wdBtnCancelDetails = $("#wdBtnCancelDetails");
+  if (wdBtnCancelDetails) {
+    wdBtnCancelDetails.addEventListener("click", () => {
+      $("#blockDetailsModal").classList.add("hidden");
+    });
+  }
+
+  // Block Details — Confirm → proceed to Intent Modal
+  const wdBtnConfirmDetails = $("#wdBtnConfirmDetails");
+  if (wdBtnConfirmDetails) {
+    wdBtnConfirmDetails.addEventListener("click", () => {
+      $("#blockDetailsModal").classList.add("hidden");
+
+      const intentModal = $("#intentModal");
+      const intentInput = $("#intentModalInput");
+      const intentTasksInput = $("#intentTasksInput");
+      if (intentModal && intentInput) {
+        intentModal.classList.remove("hidden");
+        intentInput.value = "";
+        if (intentTasksInput) intentTasksInput.value = "";
+        intentInput.focus();
+      }
+    });
+  }
+
+  // Block Details — Overlay click to close
+  const blockDetailsModal = $("#blockDetailsModal");
+  if (blockDetailsModal) {
+    blockDetailsModal.addEventListener("click", (e) => {
+      if (e.target === blockDetailsModal) {
+        blockDetailsModal.classList.add("hidden");
+      }
+    });
+  }
+
+  // Block Details — Retry (re-fetch groups)
+  const wdBtnRetry = $("#wdBlockDetailsRetry");
+  if (wdBtnRetry) {
+    wdBtnRetry.addEventListener("click", async () => {
+      await refreshGroups();
+      const details = computeBlockDetails();
+      renderBlockDetailsModal(details);
+    });
+  }
 
   const intentInput = $("#intentModalInput");
   if (intentInput) {
@@ -1216,9 +2402,9 @@ function initEvents() {
         payload.intent_tasks = intentTasks;
       }
 
-      if (scheduleType === "in") {
+      if (activeStartFlow === "in") {
         payload.schedule_in = parseInt(els.scheduleIn.value);
-      } else if (scheduleType === "at") {
+      } else if (activeStartFlow === "at") {
         payload.schedule_at = els.scheduleAt.dataset.value || els.scheduleAt.value;
       }
 
@@ -1231,7 +2417,12 @@ function initEvents() {
       try {
         const res = await api("POST", "/api/start", payload);
         if (res.status === "ok") {
-          if (payload.schedule_in || payload.schedule_at) {
+          const confirmed = await waitForStatusConfirmation((status) =>
+            sessionStatusMatchesPayload(status, payload),
+          );
+          if (!confirmed) {
+            showToast("Request accepted; waiting for daemon confirmation.");
+          } else if (payload.schedule_in || payload.schedule_at) {
             showToast("Session scheduled successfully! 🗓️");
           } else {
             showToast("Session started! 🚀");
@@ -1252,11 +2443,10 @@ function initEvents() {
   }
 
   // Recurring Schedules Setup
-  let selectedRecurringDays = [];
-  
   if (els.recurringDays) {
     els.recurringDays.querySelectorAll('.day-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
         btn.classList.toggle('active');
         const day = parseInt(btn.dataset.day, 10);
         if (selectedRecurringDays.includes(day)) {
@@ -1264,8 +2454,13 @@ function initEvents() {
         } else {
           selectedRecurringDays.push(day);
         }
+        updateSetupSummaries();
       });
     });
+  }
+
+  if (els.recurringName) {
+    els.recurringName.addEventListener("input", updateSetupSummaries);
   }
 
   if (els.btnAddRecurring) {
@@ -1280,29 +2475,7 @@ function initEvents() {
         return;
       }
 
-      // Derive duration from the current session settings
-      let duration;
-      if (sessionType === "pomodoro") {
-        duration = (pomoFocusMin + pomoBreakMin) * pomoCycles;
-      } else {
-        duration = selectedDuration;
-      }
-
-      const payload = {
-        days_of_week: selectedRecurringDays,
-        start_time: time,
-        duration_minutes: duration,
-        mode: currentMode,
-        session_type: sessionType,
-        groups: Array.from(selectedGroups),
-      };
-
-      // Include pomodoro params if applicable
-      if (sessionType === "pomodoro") {
-        payload.focus_minutes = pomoFocusMin;
-        payload.break_minutes = pomoBreakMin;
-        payload.cycles = pomoCycles;
-      }
+      const payload = buildRecurringPayloadFromCurrent();
 
       const originalBtnHTML = els.btnAddRecurring.innerHTML;
       els.btnAddRecurring.innerHTML = '<span class="btn-spinner"></span> Adding...';
@@ -1312,16 +2485,16 @@ function initEvents() {
         const res = await api("POST", "/api/schedules/recurring", payload);
         if (res.status === "ok") {
           showToast("Recurring schedule added successfully.");
-          // Optimistic: immediately render the new rule
           if (res.rule) {
-            _cachedRecurring.push(res.rule);
-            _lastRecurringJSON = JSON.stringify(_cachedRecurring);
-            renderRecurringList(_cachedRecurring);
+            syncRecurringCache(res.rule);
           }
+          await refreshStatus();
           selectedRecurringDays = [];
           els.recurringDays.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+          if (els.recurringName) els.recurringName.value = "";
           els.recurringTime.value = "";
           delete els.recurringTime.dataset.value;
+          updateSetupSummaries();
         } else {
           showToast(`Error: ${res.message || "Failed to add"}`);
         }
@@ -1334,51 +2507,160 @@ function initEvents() {
     });
   }
 
-  window.removeRecurringSchedule = async function(id) {
-    // Optimistic: immediately remove from DOM
-    _cachedRecurring = _cachedRecurring.filter(r => r.id !== id);
-    _lastRecurringJSON = JSON.stringify(_cachedRecurring);
-    renderRecurringList(_cachedRecurring);
-    try {
-      const res = await api("DELETE", `/api/schedules/recurring/${id}`);
-      if (res.status === "ok") {
-        showToast("Recurring schedule removed.");
-      } else {
-        showToast(`Error: ${res.message || "Failed to remove"}`);
-        // Reconcile on failure
-        refreshStatus();
+  // Quick Action Rescue button
+  const btnQuickRescue = $("#btnQuickRescue");
+  const rescueQuickDuration = $("#rescueQuickDuration");
+  
+  if (btnQuickRescue) {
+    btnQuickRescue.addEventListener("click", async () => {
+      if (isSessionActive) {
+        showToast("Rescue can start after the current focus session is unlocked or finished.");
+        return;
       }
-    } catch (err) {
-      showToast("Connection failed.");
-      refreshStatus();
-    }
-  };
+      const duration = parseInt(rescueQuickDuration.value, 10) || 10;
+      const payload = {
+        duration_minutes: duration,
+        mode: "rescue",
+        session_type: "standard",
+      };
+      const originalRescueHTML = btnQuickRescue.innerHTML;
+      btnQuickRescue.innerHTML = '<span class="btn-spinner"></span> Activating...';
+      btnQuickRescue.disabled = true;
+      btnQuickRescue.setAttribute("aria-busy", "true");
+      try {
+        const res = await api("POST", "/api/start", payload);
+        if (res.status === "ok") {
+          const confirmed = await waitForStatusConfirmation((status) =>
+            sessionStatusMatchesPayload(status, payload),
+          );
+          if (confirmed) {
+            showToast(res.message);
+          } else {
+            showToast("Rescue request accepted; waiting for daemon confirmation.");
+          }
+        } else {
+          showToast(`Error: ${res.message || "Failed to activate Rescue"}`);
+        }
+      } catch (err) {
+        showToast("Connection failed.");
+      } finally {
+        btnQuickRescue.innerHTML = originalRescueHTML;
+        btnQuickRescue.disabled = false;
+        btnQuickRescue.removeAttribute("aria-busy");
+      }
+    });
+  }
 
-  // Rescue button
-  els.btnRescue.addEventListener("click", async () => {
-    const duration = parseInt(els.rescueDuration.value, 10) || 10;
-    const payload = {
-      duration: duration,
-      mode: "whitelist",
-      session_type: "rescue",
-    };
-    const originalRescueHTML = els.btnRescue.innerHTML;
-    els.btnRescue.innerHTML = '<span class="btn-spinner"></span> Activating...';
-    els.btnRescue.disabled = true;
-    els.btnRescue.setAttribute("aria-busy", "true");
-    try {
-      const res = await api("POST", "/api/start", payload);
-      if (res.status === "ok") {
-        showToast(res.message);
-        refreshStatus();
+  if (els.recurringEditDays) {
+    els.recurringEditDays.querySelectorAll(".day-btn").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        const day = parseInt(btn.dataset.day, 10);
+        if (editRecurringDays.includes(day)) {
+          editRecurringDays = editRecurringDays.filter((item) => item !== day);
+        } else {
+          editRecurringDays.push(day);
+        }
+        setRecurringDayButtons(els.recurringEditDays, editRecurringDays);
+      });
+    });
+  }
+
+  if (els.recurringEditTime) {
+    els.recurringEditTime.addEventListener("click", () => openPicker(els.recurringEditTime, 'time'));
+  }
+
+  if (els.recurringEditType) {
+    els.recurringEditType.addEventListener("change", updateEditModalFields);
+  }
+
+  if (els.btnCancelRecurringEdit) {
+    els.btnCancelRecurringEdit.addEventListener("click", closeRecurringEditModal);
+  }
+
+  if (els.btnSaveRecurringEdit) {
+    els.btnSaveRecurringEdit.addEventListener("click", saveRecurringEdit);
+  }
+
+  if (els.recurringEditModal) {
+    els.recurringEditModal.addEventListener("click", (event) => {
+      if (event.target === els.recurringEditModal) closeRecurringEditModal();
+    });
+  }
+
+
+
+  let _btnSkip = document.getElementById("btnSkipPrayer"); if (_btnSkip) _btnSkip.addEventListener('click', async () => {
+      const skipBtn = document.getElementById('btnSkipPrayer');
+      skipBtn.disabled = true;
+      const res = await api('POST', '/api/prayer-skip');
+      if (res.status === 'ok') {
+          showToast('Prayer skipped.');
       } else {
-        showToast(res.message || "Failed to activate Rescue Throne.");
+          showToast(res.message || 'Cannot skip.');
       }
-    } finally {
-      els.btnRescue.innerHTML = originalRescueHTML;
-      els.btnRescue.disabled = false;
-      els.btnRescue.removeAttribute("aria-busy");
-    }
+      skipBtn.disabled = false;
+  });
+
+  let _btnUnskip = document.getElementById("btnUnskipPrayer"); if (_btnUnskip) _btnUnskip.addEventListener('click', async () => {
+      const unskipBtn = document.getElementById('btnUnskipPrayer');
+      unskipBtn.disabled = true;
+      const res = await api('POST', '/api/prayer-unskip');
+      if (res.status === 'ok') {
+          showToast('Skip cancelled.');
+      } else {
+          showToast(res.message || 'Cannot undo skip.');
+      }
+      unskipBtn.disabled = false;
+  });
+
+  let _btnDetectDash = document.getElementById("btnDetectLocationDash"); if (_btnDetectDash) _btnDetectDash.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+          showToast("Geolocation is not supported by your browser.");
+          return;
+      }
+      const btn = document.getElementById("btnDetectLocationDash");
+      const textEl = document.getElementById("prayerOfflineText");
+      btn.disabled = true;
+      btn.textContent = "Detecting…";
+      if (textEl) textEl.textContent = "🔍 Detecting your location…";
+
+      navigator.geolocation.getCurrentPosition(
+          async (position) => {
+              const lat = position.coords.latitude;
+              const lng = position.coords.longitude;
+              try {
+                  const res = await api("POST", "/api/settings", {
+                      settings: { prayer_latitude: lat, prayer_longitude: lng },
+                  });
+                  if (res.status === "ok") {
+                      if (textEl) textEl.textContent = `📍 Location set (${lat.toFixed(4)}, ${lng.toFixed(4)}). Prayer times updated!`;
+                      btn.style.display = "none";
+                      showToast("Location saved and prayer times updated successfully.");
+                  } else {
+                      showToast("Error saving location: " + (res.message || "Unknown error"));
+                      if (textEl) textEl.textContent = "❌ Failed to save location.";
+                      btn.disabled = false;
+                      btn.textContent = "📍 Detect My Location";
+                  }
+              } catch (e) {
+                  showToast("Failed to save location.");
+                  if (textEl) textEl.textContent = "❌ Failed to save location.";
+                  btn.disabled = false;
+                  btn.textContent = "📍 Detect My Location";
+              }
+          },
+          (error) => {
+              btn.disabled = false;
+              btn.textContent = "📍 Detect My Location";
+              let msg = "Location detection failed.";
+              if (error.code === error.PERMISSION_DENIED) msg = "Location permission denied. Allow location access in your browser.";
+              else if (error.code === error.TIMEOUT) msg = "Location request timed out. Try again.";
+              showToast(msg);
+              if (textEl) textEl.textContent = "⚠️ Set your location to activate prayer times.";
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+      );
   });
 
   // Stop button → open modal
@@ -1394,6 +2676,28 @@ function initEvents() {
   $("#btnCancelStop").addEventListener("click", () => {
     els.stopModal.classList.add("hidden");
   });
+
+  // Continue Focus (cancel pending unlock)
+  const btnContinueFocus = $("#btnContinueFocus");
+  if (btnContinueFocus) {
+    btnContinueFocus.addEventListener("click", async () => {
+      btnContinueFocus.disabled = true;
+      try {
+        const res = await api("POST", "/api/cancel-stop");
+        if (res.status === "ok") {
+          showToast(res.message);
+          refreshStatus();
+          updateSetupSummaries();
+        } else {
+          showToast("Error: " + res.message);
+        }
+      } catch (err) {
+        showToast("Connection failed.");
+      } finally {
+        btnContinueFocus.disabled = false;
+      }
+    });
+  }
 
   // Confirm stop
   $("#btnConfirmStop").addEventListener("click", async () => {
@@ -1412,9 +2716,14 @@ function initEvents() {
     try {
       const res = await api("POST", "/api/stop", { key });
       if (res.status === "pending" || res.status === "ok") {
-        els.stopModal.classList.add("hidden");
-        showToast(res.message);
-        refreshStatus();
+        const confirmed = await waitForStatusConfirmation(stopStatusConfirmed);
+        if (confirmed) {
+          els.stopModal.classList.add("hidden");
+          showToast(res.message);
+          updateSetupSummaries();
+        } else {
+          showToast("Unlock accepted; waiting for daemon confirmation.");
+        }
       } else {
         els.modalError.textContent = res.message || "Invalid passphrase.";
         els.modalError.classList.remove("hidden");
@@ -1465,6 +2774,7 @@ function initEvents() {
   // Cancel permanent unblock
   $("#btnCancelPermaUnblock").addEventListener("click", () => {
     els.permaUnblockModal.classList.add("hidden");
+    updateSetupSummaries();
   });
 
   // Confirm permanent unblock
@@ -1519,6 +2829,9 @@ function initEvents() {
       }
       if (!els.permaUnblockModal.classList.contains("hidden")) {
         els.permaUnblockModal.classList.add("hidden");
+      }
+      if (els.recurringEditModal && !els.recurringEditModal.classList.contains("hidden")) {
+        closeRecurringEditModal();
       }
     }
   });
@@ -1605,25 +2918,575 @@ async function addDomain(listName) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 async function loadApiToken() {
-  try {
-    const res = await fetch("/api/token");
-    const data = await res.json();
-    if (data.token) {
-      apiToken = data.token;
-    }
-  } catch (e) {
-    console.error("Failed to load API token:", e);
+  if (window.apiToken) {
+    apiToken = window.apiToken;
   }
 }
 
+function updateLiveCountdowns() {
+  $$(".cal-duration").forEach(el => {
+    const startMs = el.dataset.startMs;
+    if (startMs) {
+      const remSecs = Math.max(0, Math.floor((parseInt(startMs) - Date.now()) / 1000));
+      el.textContent = "⏳ " + formatTime(remSecs);
+      
+      // Disable cancel button if within 20 mins
+      if (remSecs <= 20 * 60) {
+        const btn = el.parentElement.parentElement.querySelector(".perma-cancel-btn");
+        if (btn && !btn.disabled) {
+          btn.disabled = true;
+          btn.textContent = "Locked";
+          btn.title = "Cannot cancel schedules within 20 minutes of starting.";
+        }
+      }
+    }
+  });
+
+  // Dynamically update recurring schedule lock states without waiting for API refresh
+  $$(".recurring-actions").forEach(actionsEl => {
+    if (actionsEl.dataset.enabled === "true" && actionsEl.dataset.nextRunAt) {
+      const nextRunDate = new Date(actionsEl.dataset.nextRunAt);
+      const diffMinutes = (nextRunDate.getTime() - Date.now()) / 60000;
+      
+      const isLocked = diffMinutes <= 20 && diffMinutes > -5;
+      const currentlyLocked = actionsEl.querySelector(".locked-btn") !== null;
+      
+      if (isLocked && !currentlyLocked) {
+        actionsEl.innerHTML = "";
+        const lockedBtn = document.createElement("button");
+        lockedBtn.className = "recurring-action locked-btn";
+        lockedBtn.textContent = "🔒 Locked";
+        lockedBtn.disabled = true;
+        lockedBtn.style.cursor = "not-allowed";
+        lockedBtn.style.opacity = "0.7";
+        lockedBtn.style.color = "var(--text-muted)";
+        actionsEl.appendChild(lockedBtn);
+      } else if (!isLocked && currentlyLocked) {
+        // Unlock threshold passed (e.g. schedule expired or we shifted out of the 20 min window)
+        // Dynamically rebuild the buttons without wiping out the whole list
+        actionsEl.innerHTML = "";
+        const schId = actionsEl.dataset.id;
+        const sch = _cachedRecurring.find(s => s.id === schId);
+        if (sch) {
+          const toggleBtn = document.createElement("button");
+          toggleBtn.className = "recurring-action";
+          toggleBtn.textContent = sch.enabled === false ? "Resume" : "Pause";
+          toggleBtn.setAttribute("aria-label", `${toggleBtn.textContent} ${sch.name || "recurring schedule"}`);
+          toggleBtn.addEventListener("click", () => toggleRecurringSchedule(sch.id, sch.enabled === false));
+
+          const editBtn = document.createElement("button");
+          editBtn.className = "recurring-action";
+          editBtn.textContent = "Edit";
+          editBtn.setAttribute("aria-label", `Edit ${sch.name || "recurring schedule"}`);
+          editBtn.addEventListener("click", () => openRecurringEditModal(sch));
+
+          const duplicateBtn = document.createElement("button");
+          duplicateBtn.className = "recurring-action";
+          duplicateBtn.textContent = "Duplicate";
+          duplicateBtn.setAttribute("aria-label", `Duplicate ${sch.name || "recurring schedule"}`);
+          duplicateBtn.addEventListener("click", () => duplicateRecurringSchedule(sch.id));
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "recurring-action danger";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.setAttribute("aria-label", `Delete ${sch.name || "recurring schedule"}`);
+          deleteBtn.addEventListener("click", () => removeRecurringSchedule(sch.id));
+
+          actionsEl.appendChild(toggleBtn);
+          actionsEl.appendChild(editBtn);
+          actionsEl.appendChild(duplicateBtn);
+          actionsEl.appendChild(deleteBtn);
+        }
+      }
+    }
+  });
+
+  if (lastPrayerData) {
+    if (lastPrayerData.prayer_active && localPrayerActiveTargetMs) {
+      const activeTimer = document.getElementById('prayerActiveTimer');
+      if (activeTimer) {
+        const rem = Math.max(0, Math.floor((localPrayerActiveTargetMs - Date.now()) / 1000));
+        activeTimer.textContent = formatTime(rem);
+      }
+    } else if (!lastPrayerData.prayer_active && localPrayerTargetMs) {
+      const countdownEl = document.getElementById('prayerCountdown');
+      if (countdownEl) {
+        const rem = Math.max(0, Math.floor((localPrayerTargetMs - Date.now()) / 1000));
+        countdownEl.textContent = formatTime(rem);
+      }
+    }
+  }
+}
+
+// ── Tracking & Analytics ─────────────────────────────────────────────────────
+
+async function refreshTracking(range) {
+  trackingRange = range || trackingRange;
+  const data = await api("GET", `/api/history?range=${encodeURIComponent(trackingRange)}`);
+  if (data.status !== "ok") return;
+  trackingData = data;
+  renderTrackingSummary(data.summary);
+  renderTrackingStreak(data.summary);
+  renderTrackingChart(data.summary);
+  renderTrackingHeatmap(data.summary);
+  renderTrackingBreakdown(data.summary);
+  renderTrackingRecent(data.entries);
+}
+
+function formatFocusTime(minutes) {
+  if (!minutes || minutes <= 0) return "0m";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function renderTrackingSummary(summary) {
+  const netFocusEl = document.getElementById("kpiValueNetFocusTime");
+  const totalFocusEl = document.getElementById("kpiValueTotalFocusTime");
+  const sessionsEl = document.getElementById("kpiValueSessions");
+  const percentageEl = document.getElementById("kpiValuePercentageFocus");
+
+  const netMinutes = summary.net_focus_minutes != null ? summary.net_focus_minutes : summary.total_focus_minutes;
+
+  if (netFocusEl) netFocusEl.textContent = formatFocusTime(netMinutes);
+  if (totalFocusEl) totalFocusEl.textContent = formatFocusTime(summary.total_focus_minutes);
+  if (sessionsEl) sessionsEl.textContent = summary.total_sessions;
+
+  if (percentageEl) {
+    if (summary.daily_focus_goal_hours && summary.daily_focus_goal_hours > 0) {
+      let days = 1;
+      if (trackingRange === "week") days = 7;
+      else if (trackingRange === "month") days = 30;
+      else if (trackingRange === "year") days = 365;
+      else if (trackingRange === "all") days = Math.max(1, Object.keys(summary.daily_totals || {}).length);
+
+      const targetMinutes = summary.daily_focus_goal_hours * 60 * days;
+      const percentage = Math.min(100, Math.round((netMinutes / targetMinutes) * 100));
+      percentageEl.textContent = `${percentage}%`;
+      percentageEl.parentElement.style.display = "block";
+    } else {
+      percentageEl.parentElement.style.display = "none";
+    }
+  }
+}
+
+function renderTrackingStreak(summary) {
+  const currentEl = document.getElementById("streakCurrent");
+  const longestEl = document.getElementById("streakLongest");
+  const longestSessionEl = document.getElementById("streakLongestSession");
+  if (currentEl) currentEl.textContent = summary.current_streak_days;
+  if (longestEl) longestEl.textContent = summary.longest_streak_days;
+  if (longestSessionEl) longestSessionEl.textContent = formatFocusTime(summary.longest_session_minutes);
+}
+
+function renderTrackingChart(summary) {
+  const container = document.getElementById("trackingBarChart");
+  const cardTitle = container.parentElement.querySelector(".card-title");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (!trackingData || !trackingData.entries || trackingData.entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "tracking-empty-state";
+    empty.textContent = "No session data for this period.";
+    container.appendChild(empty);
+    return;
+  }
+
+  let colCount, labels, getBucketKey, getBucketLabel;
+
+  if (trackingRange === "today" || trackingRange === "yesterday") {
+    if (cardTitle) cardTitle.textContent = "Hourly Focus";
+    colCount = 24;
+    labels = Array.from({length: 24}, (_, i) => i % 3 === 0 ? `${i}` : ""); // Show some labels
+    getBucketKey = (e) => e.hour_started;
+    getBucketLabel = (key) => `${key}:00`;
+  } else if (trackingRange === "week") {
+    if (cardTitle) cardTitle.textContent = "Daily Focus";
+    colCount = 7;
+    // day_of_week: 0 is Mon, 6 is Sun
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    labels = dayNames;
+    getBucketKey = (e) => e.day_of_week;
+    getBucketLabel = (key) => dayNames[key];
+  } else if (trackingRange === "month") {
+    if (cardTitle) cardTitle.textContent = "Daily Focus";
+    colCount = 31;
+    labels = Array.from({length: 31}, (_, i) => (i + 1) % 5 === 0 || i === 0 ? `${i + 1}` : "");
+    getBucketKey = (e) => new Date(e.started_at).getDate() - 1; // 0-30 index
+    getBucketLabel = (key) => `Day ${key + 1}`;
+  } else {
+    // year or all
+    if (cardTitle) cardTitle.textContent = "Monthly Focus";
+    colCount = 12;
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    labels = months;
+    getBucketKey = (e) => new Date(e.started_at).getMonth(); // 0-11 index
+    getBucketLabel = (key) => months[key];
+  }
+
+  // Initialize buckets
+  const buckets = Array.from({length: colCount}, () => ({ minutes: 0, sessions: 0 }));
+
+  // Aggregate
+  trackingData.entries.forEach(e => {
+    const key = getBucketKey(e);
+    if (key >= 0 && key < colCount) {
+      if (e.net_focus_minutes > 0) {
+        buckets[key].minutes += e.net_focus_minutes;
+        buckets[key].sessions += 1;
+      }
+    }
+  });
+
+  const maxMinutes = Math.max(...buckets.map(b => b.minutes), 1);
+  const todayObj = new Date();
+  
+  // Highlight the current bucket depending on the range
+  let currentKey = -1;
+  if (trackingRange === "today") currentKey = todayObj.getHours();
+  else if (trackingRange === "week") {
+    // JS getDay() is 0=Sun. We want 0=Mon
+    currentKey = (todayObj.getDay() + 6) % 7;
+  } else if (trackingRange === "month") {
+    currentKey = todayObj.getDate() - 1;
+  } else if (trackingRange === "year") {
+    currentKey = todayObj.getMonth();
+  }
+
+  buckets.forEach((bucket, i) => {
+    const heightPct = maxMinutes > 0 ? Math.max(2, (bucket.minutes / maxMinutes) * 100) : 2;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "tracking-bar-wrapper";
+
+    const bar = document.createElement("div");
+    bar.className = "tracking-bar";
+    bar.style.height = `${heightPct}%`;
+    bar.style.animation = `barGrow 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${i * 0.03}s both`;
+    if (bucket.minutes === 0) {
+      bar.style.background = "rgba(255,255,255,0.05)";
+      bar.style.opacity = "0.4";
+    }
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "tracking-bar-tooltip";
+    tooltip.textContent = `${getBucketLabel(i)}: ${formatFocusTime(bucket.minutes)} · ${bucket.sessions} session${bucket.sessions !== 1 ? "s" : ""}`;
+    bar.appendChild(tooltip);
+
+    const label = document.createElement("div");
+    label.className = `tracking-bar-label${i === currentKey ? " today-label" : ""}`;
+    label.textContent = labels[i];
+
+    wrapper.appendChild(bar);
+    wrapper.appendChild(label);
+    container.appendChild(wrapper);
+  });
+}
+
+function renderTrackingHeatmap(summary) {
+  const grid = document.getElementById("trackingHeatmap");
+  const hourLabelsEl = document.getElementById("heatmapHourLabels");
+  if (!grid || !hourLabelsEl) return;
+  grid.innerHTML = "";
+  hourLabelsEl.innerHTML = "";
+
+  // Set up configuration based on trackingRange
+  let colCount, rowLabels, colLabels;
+  let getCellKey; // function(rowIdx, colIdx) returns key in heatData
+  let getCellTitle; // function(rowIdx, colIdx) returns tooltip text
+  
+  if (trackingRange === "today" || trackingRange === "yesterday") {
+    colCount = 24;
+    rowLabels = [trackingRange === "today" ? "Today" : "Yesterday"];
+    colLabels = Array.from({length: 24}, (_, i) => i % 3 === 0 ? `${i}` : "");
+    getCellKey = (r, c) => `${c}`; // Group by hour
+    getCellTitle = (r, c) => `${c}:00`;
+  } else if (trackingRange === "month") {
+    // 31 columns, 1 row
+    colCount = 31;
+    rowLabels = ["This Month"];
+    colLabels = Array.from({length: 31}, (_, i) => (i + 1) % 5 === 0 || i === 0 ? `${i + 1}` : "");
+    getCellKey = (r, c) => `${c + 1}`; // Group by day of month
+    getCellTitle = (r, c) => `Day ${c + 1}`;
+  } else if (trackingRange === "year" || trackingRange === "all") {
+    // 12 columns, 1 row
+    colCount = 12;
+    rowLabels = [trackingRange === "year" ? "This Year" : "All Time"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    colLabels = months;
+    getCellKey = (r, c) => `${c}`; // Group by month
+    getCellTitle = (r, c) => `${months[c]}`;
+  } else {
+    // Week (default)
+    colCount = 24;
+    rowLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    colLabels = Array.from({length: 24}, (_, i) => i % 3 === 0 ? `${i}` : "");
+    getCellKey = (r, c) => `${r}:${c}`; // dow:hour
+    getCellTitle = (r, c) => `${rowLabels[r]} ${c}:00`;
+  }
+
+  // Build per-cell data from entries
+  const heatData = {}; 
+  if (trackingData && trackingData.entries) {
+    trackingData.entries.forEach(e => {
+      let key;
+      if (e.net_focus_minutes <= 0) return; // Only count true focus sessions in heatmap
+      
+      const d = new Date(e.started_at);
+      if (trackingRange === "today" || trackingRange === "yesterday") {
+        key = `${e.hour_started}`;
+      } else if (trackingRange === "month") {
+        key = `${d.getDate()}`;
+      } else if (trackingRange === "year" || trackingRange === "all") {
+        key = `${d.getMonth()}`;
+      } else {
+        key = `${e.day_of_week}:${e.hour_started}`;
+      }
+      heatData[key] = (heatData[key] || 0) + 1; // Count of focus blocks
+    });
+  }
+  const maxCount = Math.max(...Object.values(heatData), 1);
+
+  // Apply grid template styles inline to allow dynamic column counts
+  const gridTemplate = `50px repeat(${colCount}, 1fr)`;
+  hourLabelsEl.style.gridTemplateColumns = gridTemplate;
+
+  // Hour/Column labels row
+  const cornerLabel = document.createElement("div");
+  cornerLabel.className = "heatmap-hour-label";
+  hourLabelsEl.appendChild(cornerLabel);
+  for (let c = 0; c < colCount; c++) {
+    const lbl = document.createElement("div");
+    lbl.className = "heatmap-hour-label";
+    lbl.textContent = colLabels[c];
+    hourLabelsEl.appendChild(lbl);
+  }
+
+  // Data rows
+  rowLabels.forEach((rowName, r) => {
+    const row = document.createElement("div");
+    row.className = "heatmap-row";
+    row.style.gridTemplateColumns = gridTemplate;
+
+    const rowLbl = document.createElement("div");
+    rowLbl.className = "heatmap-day-label";
+    rowLbl.textContent = rowName;
+    row.appendChild(rowLbl);
+
+    for (let c = 0; c < colCount; c++) {
+      const cell = document.createElement("div");
+      cell.className = "heatmap-cell";
+      const key = getCellKey(r, c);
+      const count = heatData[key] || 0;
+      if (count > 0) {
+        const intensity = Math.min(5, Math.ceil((count / maxCount) * 5));
+        cell.dataset.intensity = intensity;
+        cell.title = `${getCellTitle(r, c)} — ${count} session${count !== 1 ? "s" : ""}`;
+      } else {
+        cell.title = `${getCellTitle(r, c)} — 0 sessions`;
+      }
+      row.appendChild(cell);
+    }
+    grid.appendChild(row);
+  });
+}
+
+function renderTrackingBreakdown(summary) {
+  const modeContainer = document.getElementById("modeBreakdown");
+  const modeLegend = document.getElementById("modeLegend");
+  const typeContainer = document.getElementById("typeBreakdown");
+  const typeLegend = document.getElementById("typeLegend");
+
+  const modeColors = { lock: "#6366f1", break: "#10b981" };
+  const modeLabels = { lock: "Lock", break: "Break" };
+  const typeColors = { standard: "#6366f1", pomodoro: "#f59e0b", rescue: "#a855f7" };
+  const typeLabels = { standard: "Standard", pomodoro: "Pomodoro", rescue: "Rescue" };
+
+  function renderBar(container, legendEl, data, colors, labels, formatFn = (x) => x) {
+    if (!container || !legendEl) return;
+    container.innerHTML = "";
+    legendEl.innerHTML = "";
+    const total = Object.values(data).reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      const empty = document.createElement("div");
+      empty.className = "breakdown-empty";
+      empty.textContent = "No data";
+      container.appendChild(empty);
+      return;
+    }
+    Object.entries(data).forEach(([key, count]) => {
+      if (count <= 0) return;
+      const pct = (count / total) * 100;
+      const seg = document.createElement("div");
+      seg.className = "breakdown-segment";
+      seg.style.width = `${pct}%`;
+      seg.style.background = colors[key] || "#6366f1";
+      seg.title = `${labels[key] || key}: ${formatFn(count)} (${Math.round(pct)}%)`;
+      container.appendChild(seg);
+
+      const legendItem = document.createElement("div");
+      legendItem.className = "breakdown-legend-item";
+      const dot = document.createElement("div");
+      dot.className = "breakdown-legend-dot";
+      dot.style.background = colors[key] || "#6366f1";
+      legendItem.appendChild(dot);
+      const text = document.createTextNode(`${labels[key] || key} (${formatFn(count)})`);
+      legendItem.appendChild(text);
+      legendEl.appendChild(legendItem);
+    });
+  }
+
+  const netMinutes = summary.net_focus_minutes != null ? summary.net_focus_minutes : summary.total_focus_minutes;
+  const breakMinutes = Math.max(0, summary.total_focus_minutes - netMinutes);
+  const modeData = { lock: netMinutes, break: breakMinutes };
+
+  renderBar(modeContainer, modeLegend, modeData, modeColors, modeLabels, formatFocusTime);
+  renderBar(typeContainer, typeLegend, summary.by_type || {}, typeColors, typeLabels);
+}
+
+function renderTrackingRecent(entries) {
+  const list = document.getElementById("trackingRecentList");
+  const countEl = document.getElementById("recentSessionsCount");
+  if (!list) return;
+  list.innerHTML = "";
+  if (countEl) countEl.textContent = entries.length;
+
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "tracking-empty-state";
+    empty.textContent = "No sessions recorded yet.";
+    list.appendChild(empty);
+    return;
+  }
+
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Show newest first, limit to 50
+  const sorted = entries.slice().reverse().slice(0, 50);
+  sorted.forEach(entry => {
+    const item = document.createElement("div");
+    item.className = "recent-session-item";
+
+    // Date column
+    const dateCol = document.createElement("div");
+    dateCol.className = "recent-session-date";
+    try {
+      const d = new Date(entry.started_at);
+      const monthSpan = document.createElement("div");
+      monthSpan.className = "recent-session-month";
+      monthSpan.textContent = monthNames[d.getMonth()];
+      const daySpan = document.createElement("div");
+      daySpan.className = "recent-session-day";
+      daySpan.textContent = d.getDate();
+      dateCol.appendChild(monthSpan);
+      dateCol.appendChild(daySpan);
+    } catch (e) {
+      dateCol.textContent = "--";
+    }
+
+    // Details column
+    const details = document.createElement("div");
+    details.className = "recent-session-details";
+
+    const timeRow = document.createElement("div");
+    timeRow.className = "recent-session-time";
+    try {
+      const d = new Date(entry.started_at);
+      const h = d.getHours();
+      const m = String(d.getMinutes()).padStart(2, "0");
+      const period = h >= 12 ? "PM" : "AM";
+      const h12 = h % 12 || 12;
+      timeRow.textContent = `${h12}:${m} ${period} · ${formatFocusTime(entry.duration_minutes)}`;
+    } catch (e) {
+      timeRow.textContent = `${formatFocusTime(entry.duration_minutes)}`;
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "recent-session-meta";
+
+    // Mode chip
+    const modeChip = document.createElement("span");
+    modeChip.className = `recent-session-chip chip-mode-${entry.mode || "blacklist"}`;
+    modeChip.textContent = (entry.mode || "blacklist") === "whitelist" ? "Whitelist" : "Blacklist";
+    meta.appendChild(modeChip);
+
+    // Type and Phase chips
+    const st = entry.session_type || "standard";
+    if (st === "pomodoro") {
+      const typeChip = document.createElement("span");
+      typeChip.className = "recent-session-chip chip-type-pomodoro";
+      typeChip.textContent = "Pomodoro";
+      meta.appendChild(typeChip);
+
+      const phase = entry.pomo_phase || "focus";
+      const phaseChip = document.createElement("span");
+      phaseChip.className = `recent-session-chip chip-phase-${phase}`;
+      phaseChip.style.background = phase === "focus" ? "rgba(99, 102, 241, 0.15)" : "rgba(16, 185, 129, 0.15)";
+      phaseChip.style.color = phase === "focus" ? "#818cf8" : "#34d399";
+      phaseChip.textContent = phase === "focus" ? "🔒 Lock" : "☕ Break";
+      meta.appendChild(phaseChip);
+    } else if (st === "rescue") {
+      const typeChip = document.createElement("span");
+      typeChip.className = "recent-session-chip chip-type-rescue";
+      typeChip.textContent = "Rescue";
+      meta.appendChild(typeChip);
+    }
+
+    // Duration chip
+    const durChip = document.createElement("span");
+    durChip.className = "recent-session-chip";
+    durChip.textContent = formatFocusTime(entry.duration_minutes);
+    meta.appendChild(durChip);
+
+    details.appendChild(timeRow);
+    details.appendChild(meta);
+
+    // Intent
+    if (entry.intent) {
+      const intentEl = document.createElement("div");
+      intentEl.className = "recent-session-intent";
+      intentEl.textContent = `🎯 ${entry.intent}`;
+      intentEl.dir = "auto";
+      details.appendChild(intentEl);
+    }
+
+    // Status icon
+    const status = document.createElement("div");
+    status.className = `recent-session-status ${entry.completed_normally ? "completed" : "unlocked"}`;
+    status.textContent = entry.completed_normally ? "✓" : "🔓";
+    status.title = entry.completed_normally ? "Completed normally" : "Ended via unlock";
+
+    item.appendChild(dateCol);
+    item.appendChild(details);
+    item.appendChild(status);
+    list.appendChild(item);
+  });
+}
+
+function initTrackingEvents() {
+  document.querySelectorAll(".tracking-range-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tracking-range-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      refreshTracking(btn.dataset.range);
+    });
+  });
+}
+
 async function init() {
+  setInterval(updateLiveCountdowns, 1000);
   initEvents();
   initPickerEvents();
+  initTrackingEvents();
   await loadApiToken();
   await refreshStatus();
   await refreshLists();
   await refreshPermaBlocklist();
   await refreshGroups();
+  await refreshTemplates();
   await loadSettings();
 
   // S10: Set min datetime to now, preventing past date selection
@@ -1636,8 +3499,22 @@ async function init() {
 
   // Modernized IPC: Server-Sent Events (SSE) instead of aggressive polling
   let eventSource = null;
+  let sseReconnectTimer = null;
+
+  function scheduleSSEReconnect() {
+    if (sseReconnectTimer) return;
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null;
+      connectSSE();
+    }, 3000);
+  }
 
   function connectSSE() {
+    if (eventSource && (eventSource.readyState === 0 || eventSource.readyState === 1)) return;
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = null;
+    }
     if (eventSource) eventSource.close();
     eventSource = new EventSource(API + "/api/stream");
     
@@ -1647,11 +3524,10 @@ async function init() {
         // SSE delivers full status payloads — apply directly
         const phaseChanged = data.pomo_phase !== _lastPomoPhase;
         const activeChanged = data.active !== _lastActiveState;
+        // Keep SSE active to drive the native menubar countdown via nativeCallback
         if (phaseChanged || activeChanged) {
-          if (countdownInterval) {
-            clearInterval(countdownInterval);
-            countdownInterval = null;
-          }
+          cancelCountdownFrame();
+          countdownSignature = "";
         }
         _lastPomoPhase = data.pomo_phase || null;
         _lastActiveState = data.active;
@@ -1664,7 +3540,8 @@ async function init() {
     eventSource.onerror = () => {
       console.warn("SSE connection lost. Reconnecting in 3s...");
       eventSource.close();
-      setTimeout(connectSSE, 3000);
+      eventSource = null;
+      scheduleSSEReconnect();
     };
   }
 
@@ -1673,6 +3550,10 @@ async function init() {
   // P4: Pause SSE when tab is hidden to save resources
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+      }
       if (eventSource) {
         eventSource.close();
         eventSource = null;
@@ -1711,18 +3592,20 @@ async function refreshGroups() {
 
 function renderSessionGroups() {
   if (Object.keys(availableGroups).length === 0) {
-    els.sessionGroups.innerHTML =
-      '<div style="color: var(--text-muted); font-size: 13px;">No groups configured in Settings.</div>';
+    // WB3: Safe DOM construction — no innerHTML with markup strings
+    els.sessionGroups.replaceChildren();
+    const emptyMsg = document.createElement("div");
+    emptyMsg.className = "loading-muted";
+    emptyMsg.textContent = "No groups configured in Settings.";
+    els.sessionGroups.appendChild(emptyMsg);
     return;
   }
 
   els.sessionGroups.innerHTML = "";
   for (const name of Object.keys(availableGroups)) {
     const btn = document.createElement("button");
-    btn.className = "dur-btn" + (selectedGroups.has(name) ? " active" : "");
+    btn.className = "dur-btn group-chip" + (selectedGroups.has(name) ? " active" : "");
     btn.dataset.group = name;
-    btn.style.cssText =
-      "padding: 8px 16px; font-size: 12px; border-radius: 100px;";
     btn.textContent = name; // Safe — no innerHTML with user data
     btn.addEventListener("click", () => {
       const gname = btn.dataset.group;
@@ -1733,9 +3616,11 @@ function renderSessionGroups() {
         selectedGroups.add(gname);
         btn.classList.add("active");
       }
+      updateRecurringSetupSummary();
     });
     els.sessionGroups.appendChild(btn);
   }
+  updateRecurringSetupSummary();
 }
 
 // ── Custom Datetime & Time Picker Functions ───────────────────────────────────
@@ -1771,6 +3656,15 @@ function formatTimeMachine(hrs, mins) {
   return `${pad(hrs)}:${pad(mins)}`;
 }
 
+function convertToDisplayTime(time24) {
+  if (!time24) return "";
+  const parts = time24.split(":");
+  if (parts.length < 2) return time24;
+  const hrs = parseInt(parts[0], 10);
+  const mins = parseInt(parts[1], 10);
+  return formatTimeDisplay(hrs, mins);
+}
+
 function closePicker() {
   const modal = document.getElementById("datetimePickerModal");
   if (modal) modal.classList.add("hidden");
@@ -1796,6 +3690,13 @@ function savePicker() {
   } else {
     pickerState.targetInput.value = formatTimeDisplay(pickerState.hour, pickerState.minute);
     pickerState.targetInput.dataset.value = formatTimeMachine(pickerState.hour, pickerState.minute);
+    if (pickerState.targetInput === els.recurringTime || pickerState.targetInput === els.scheduleAt) {
+      updateSetupSummaries();
+    }
+  }
+  
+  if (pickerState.targetInput === els.scheduleAt) {
+      updateSetupSummaries();
   }
   closePicker();
 }

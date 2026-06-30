@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sound Settings — ForcedFocus</title>
+  <title>Settings — ForcedFocus</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
@@ -13,103 +13,142 @@
 </head>
 
 <body>
-  <div class="app">
-    <header class="header">
+  <div class="app settings-layout">
+    <!-- Fixed Header -->
+    <header class="header settings-header">
       <div class="logo">
         <a href="index.html" class="back-btn" title="Back to Dashboard">←</a>
         <div>
           <h1>Settings</h1>
-          <p class="tagline">Audio Customization</p>
+          <p class="tagline">Absolute Productivity Infrastructure</p>
         </div>
       </div>
     </header>
 
-    <main class="dashboard-main">
-      <div class="grid-container">
-        <!-- Left: Sound Mapping -->
-        <section class="card">
-          <div class="card-header">
-            <h3 class="card-title">🎵 Sound Mapping</h3>
-            <p class="list-desc">
-              Select which audio files play for specific events.
-            </p>
-          </div>
+    <div class="settings-body">
+      <!-- Sidebar Navigation -->
+      <nav class="settings-sidebar glass">
+        <a href="#" class="nav-item active" data-target="pane-groups">🛡️ Domain Groups</a>
+        <a href="#" class="nav-item" data-target="pane-prayer">🕌 Prayer Mode</a>
+        <a href="#" class="nav-item" data-target="pane-tracking">🎯 Daily Goals</a>
+        <a href="#" class="nav-item" data-target="pane-sounds">🎵 Sounds</a>
+        <a href="#" class="nav-item" data-target="pane-notifications">🔔 Notifications</a>
+      </nav>
 
-          <div class="settings-grid" id="settingsGrid" style="flex: 1">
-            <div class="loading">Fetching audio files...</div>
-          </div>
+      <!-- Main Content Area -->
+      <main class="settings-content">
+        
+        <!-- PANE: Domain Groups -->
+        <div id="pane-groups" class="settings-pane active">
+          <section class="flat-card">
+            <div class="card-header">
+              <div class="settings-title-row">
+                <h3 class="card-title">🛡️ Domain Groups</h3>
+                <button class="btn-add" id="btnNewGroup" aria-label="Add new domain group">+</button>
+              </div>
+              <p class="list-desc">Create sets of websites to block together.</p>
+            </div>
+            <div class="group-list scroll-area group-list-panel" id="groupList">
+              <div class="loading">Loading groups...</div>
+            </div>
+          </section>
+        </div>
 
-          <div class="upload-section">
-            <label class="upload-label">
-              <span>Upload New Sound (.mp3)</span>
-              <input type="file" id="fileInput" accept="audio/mpeg" hidden />
-              <button class="btn-upload" id="btnTriggerUpload">
-                Choose File
+        <!-- PANE: Prayer Rescue Mode -->
+        <div id="pane-prayer" class="settings-pane">
+          <section class="flat-card">
+            <div class="card-header">
+              <h3 class="card-title">🕌 Prayer Rescue Mode</h3>
+              <p class="list-desc">Automatically block distractions during daily prayer times based on your location.</p>
+            </div>
+            <div class="settings-item settings-item-spaced">
+              <div class="settings-item-col">
+                <label for="prayerEnabled">Enable Prayer Times Check</label>
+                <p class="settings-help">Fetches local prayer times and enforces a 30-minute lock during each prayer.</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="prayerEnabled" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-item settings-item-spaced">
+              <div class="settings-item-col">
+                <label>Prayer Location</label>
+                <p class="settings-help">Uses your browser's location for accurate prayer times.
+                  <span id="locationStatus" style="display:inline-block; margin-top:4px; font-weight:500;"></span>
+                </p>
+              </div>
+              <button id="btnDetectLocation" class="btn btn-location">📍 Detect Location</button>
+            </div>
+          </section>
+        </div>
+
+        <!-- PANE: Daily Goals -->
+        <div id="pane-tracking" class="settings-pane">
+          <section class="flat-card">
+            <div class="card-header">
+              <h3 class="card-title">🎯 Daily Goals</h3>
+              <p class="list-desc">Set a daily focus target to track your completion rate.</p>
+            </div>
+            <div class="settings-item">
+              <div class="settings-item-col">
+                <label for="dailyFocusGoalHours">Number of Hours to be Completed</label>
+                <p class="settings-help">Used to calculate your Percentage Focus for the Day. Leave empty to hide the percentage.</p>
+              </div>
+              <input type="number" id="dailyFocusGoalHours" class="custom-input" min="1" max="24" placeholder="e.g. 4" style="width: 80px;" />
+            </div>
+          </section>
+        </div>
+
+        <!-- PANE: Sound Mapping -->
+        <div id="pane-sounds" class="settings-pane">
+          <section class="flat-card">
+            <div class="card-header">
+              <h3 class="card-title">🎵 Sound Mapping</h3>
+              <p class="list-desc">Select which audio files play for specific events.</p>
+            </div>
+            <div class="settings-grid settings-grid-fill" id="settingsGrid">
+              <div class="loading">Fetching audio files...</div>
+            </div>
+            <div class="upload-section">
+              <label class="upload-label">
+                <span>Upload New Sound (.mp3)</span>
+                <input type="file" id="fileInput" accept="audio/mpeg" hidden />
+                <button class="btn-upload" id="btnTriggerUpload">Choose File</button>
+              </label>
+              <div id="uploadStatus" class="upload-status"></div>
+            </div>
+            <div class="library-section">
+              <button class="library-toggle" id="btnToggleLibrary">
+                <span>Your Sounds</span>
+                <span class="toggle-icon">▼</span>
               </button>
-            </label>
-            <div id="uploadStatus" class="upload-status"></div>
-          </div>
-
-          <div class="library-section">
-            <button class="library-toggle" id="btnToggleLibrary">
-              <span>Your Sounds</span>
-              <span class="toggle-icon">▼</span>
-            </button>
-            <div class="library-content hidden" id="libraryContent">
-              <div class="sound-list scroll-area" id="soundLibrary">
-                <div class="loading">Loading library...</div>
+              <div class="library-content hidden" id="libraryContent">
+                <div class="sound-list scroll-area" id="soundLibrary">
+                  <div class="loading">Loading library...</div>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
+        </div>
 
-        </section>
-
-
-
-        <!-- Right: Domain Groups -->
-        <section class="card">
-          <div class="card-header">
-            <div style="
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: center;
-                ">
-              <h3 class="card-title">🛡️ Domain Groups</h3>
-              <button class="btn-add" id="btnNewGroup" aria-label="Add new domain group">
-                +
-              </button>
-            </div>
-            <p class="list-desc">
-              Create sets of websites to block together.
-            </p>
-          </div>
-
-          <div class="group-list scroll-area" id="groupList" style="flex: 1; margin-top: 16px; max-height: 500px">
-            <div class="loading">Loading groups...</div>
-          </div>
-
-          <!-- Notifications Settings -->
-          <div style="margin-top: 32px; border-top: 1px solid var(--border); padding-top: 24px;">
+        <!-- PANE: Notifications -->
+        <div id="pane-notifications" class="settings-pane">
+          <section class="flat-card">
             <div class="card-header">
               <h3 class="card-title">🔔 Notifications</h3>
-              <p class="list-desc">
-                Configure system alerts for your focus sessions.
-              </p>
+              <p class="list-desc">Configure system alerts for your focus sessions.</p>
             </div>
-
-            <div class="settings-item" style="margin-top: 16px">
+            <div class="settings-item settings-item-spaced">
               <div class="settings-item-col">
                 <label for="intentNotifEnabled">Continuous Target Reminders</label>
-                <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                  Send a system notification to remind you of your target.
-                </p>
+                <p class="settings-help">Send a system notification to remind you of your target.</p>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="intentNotifEnabled" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
-
             <div class="settings-item">
               <label for="intentNotifInterval">Reminder Interval</label>
               <select id="intentNotifInterval" class="custom-select">
@@ -119,29 +158,23 @@
                 <option value="30">Every 30 min</option>
               </select>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
+      </main>
+    </div>
 
-      </div>
-
-      <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
-        <button class="btn secondary" id="btnSaveSettings" style="width: 100%; max-width: 300px;">
-          Save Preferences
-        </button>
-        <a href="index.html" class="btn btn-ghost" style="max-width: 250px; text-decoration: none">Back to Dashboard</a>
-      </div>
-    </main>
+    <!-- Fixed Footer -->
+    <footer class="settings-footer-fixed glass">
+      <button class="btn secondary settings-primary-action" id="btnSaveSettings">
+        Save Preferences
+      </button>
+    </footer>
 
     <!-- Group Edit Modal -->
     <div class="modal-overlay hidden" id="groupModal">
-      <div class="modal card glass" style="max-width: 500px; width: 90%">
+      <div class="modal card glass modal-narrow">
         <h2 id="groupModalTitle">🛡️ New Group</h2>
-        <div style="
-              display: flex;
-              flex-direction: column;
-              gap: 16px;
-              margin-top: 20px;
-            ">
+        <div class="modal-form-stack">
           <div class="pomo-field">
             <label>Group Name</label>
             <input type="text" id="groupNameInput" placeholder="e.g. Social Media" />
@@ -152,14 +185,9 @@
               placeholder="reddit.com&#10;twitter.com"></textarea>
           </div>
         </div>
-        <div class="modal-actions" style="margin-top: 24px">
+        <div class="modal-actions spaced">
           <button class="btn secondary" id="btnSaveGroup">Save Group</button>
-          <button class="btn" id="btnCancelGroup" style="
-                background: rgba(255, 255, 255, 0.05);
-                color: var(--text-primary);
-              ">
-            Cancel
-          </button>
+          <button class="btn btn-soft" id="btnCancelGroup">Cancel</button>
         </div>
       </div>
     </div>

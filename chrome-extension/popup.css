@@ -164,7 +164,7 @@ body::after {
   stroke-linecap: round;
   stroke-dasharray: 326.73;
   stroke-dashoffset: 326.73;
-  transition: stroke-dashoffset 1s linear;
+  transition: stroke 0.3s ease;
 }
 
 .timer-text {
@@ -487,9 +487,29 @@ body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   .stop-dialog {
     animation: none;
   }
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+.mode-chip:focus-visible,
+.type-chip:focus-visible,
+.dur-chip:focus-visible,
+.pomo-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .stop-dialog p {
@@ -727,4 +747,86 @@ body::after {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ── Block Details Dialog ────────────── */
+.block-details-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.block-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  transition: background var(--ease-micro);
+}
+
+.detail-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.block-details-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.detail-retry-btn {
+  background: transparent;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: var(--danger);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ease-micro);
+}
+
+.detail-retry-btn:hover {
+  background: rgba(244, 63, 94, 0.1);
+}
+
+/* Confirm button uses accent gradient instead of danger red */
+.dbtn-start {
+  background: var(--accent-gradient);
+  color: white;
 }

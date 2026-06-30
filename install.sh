@@ -102,7 +102,7 @@ print_success "Daemon state cleared"
 
 print_step "Initializing secure directory structure"
 mkdir -p "$CONFIG_DIR"
-chmod 700 "$CONFIG_DIR"
+chmod 711 "$CONFIG_DIR"
 chown root:wheel "$CONFIG_DIR"
 REAL_USER="${SUDO_USER:-$USER}"
 echo "$REAL_USER" > "$CONFIG_DIR/user"
@@ -183,7 +183,7 @@ if [[ ! -f "$KS_HASH_FILE" ]]; then
     echo -e "  ${WHITE}${BOLD}Set Security Key${NC}"
     echo -e "  ${DIM}Required to unlock blocking sessions.${NC}"
     echo ""
-    $PYTHON_BIN "$DAEMON_DST" set-key || $PYTHON_BIN "$CLI_DST" set-key
+    "$CLI_DST" set-key
     if [[ ! -f "$KS_HASH_FILE" ]]; then
         echo -e "${RED}✗ Key not set. Aborting.${NC}"
         exit 1

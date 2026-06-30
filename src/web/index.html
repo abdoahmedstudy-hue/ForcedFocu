@@ -21,7 +21,9 @@
         <!-- Header -->
         <header class="header">
           <div class="logo">
-            <div class="logo-icon">⚡</div>
+            <div class="logo-icon" style="padding: 6px;">
+              <img src="icons/block-user.png" alt="Logo" style="width: 120%;height: 100%;object-fit: contain;">
+            </div>
             <div>
               <h1>ForcedFocus</h1>
               <p class="tagline">Unbreakable Productivity</p>
@@ -114,6 +116,7 @@
 
         <div class="unlock-info hidden" id="unlockInfo">
           <p>⏱ Unlock pending — releases at 12:00 (10m left)</p>
+          <button class="btn-continue-focus" id="btnContinueFocus">Continue Focus</button>
         </div>
       </div>
 
@@ -488,20 +491,21 @@
 
     <!-- Stop Modal -->
     <div class="modal-overlay hidden" id="stopModal">
-      <div class="modal">
-        <h2>🔐 Unlock Session</h2>
+      <div class="modal modal-unlock-session">
+        <div class="modal-icon">🔐</div>
+        <h2>Unlock Session</h2>
         <p>
           Enter your kill-switch passphrase.<br />
-          <strong>Blocking will continue for 20 more minutes</strong> after
+          <strong style="color: #ef4444;">Blocking will continue for 20 more minutes</strong> after
           verification.
         </p>
         <form id="passphraseForm" onsubmit="return false;">
           <label for="passphraseInput" class="sr-only">Kill-switch passphrase</label>
           <input type="password" id="passphraseInput" placeholder="Kill-switch passphrase" autocomplete="off" />
         </form>
-        <div class="modal-actions">
-          <button class="btn btn-cancel" id="btnCancelStop">Cancel</button>
-          <button class="btn btn-confirm" id="btnConfirmStop">
+        <div class="modal-actions" style="margin-top: 24px;">
+          <button class="btn btn-cancel" id="btnCancelStop" style="flex: 1;">Cancel</button>
+          <button class="btn btn-confirm" id="btnConfirmStop" style="flex: 2;">
             Confirm Unlock
           </button>
         </div>
@@ -511,19 +515,20 @@
 
     <!-- Permanent Unblock Modal -->
     <div class="modal-overlay hidden" id="permaUnblockModal">
-      <div class="modal">
-        <h2>🔓 Permanent Unblock</h2>
+      <div class="modal modal-perma-unblock">
+        <div class="modal-icon">🔓</div>
+        <h2>Permanent Unblock</h2>
         <p>
           Enter your kill-switch passphrase to request unblocking of the domain.<br />
-          <strong>Unblocking will take effect after a 30-minute delay</strong>.
+          <strong style="color: #ef4444;">Unblocking will take effect after a 30-minute delay</strong>.
         </p>
         <form id="permaUnblockForm" onsubmit="return false;">
           <label for="permaUnblockInput" class="sr-only">Kill-switch passphrase</label>
           <input type="password" id="permaUnblockInput" placeholder="Kill-switch passphrase" autocomplete="off" />
         </form>
-        <div class="modal-actions">
-          <button class="btn btn-cancel" id="btnCancelPermaUnblock">Cancel</button>
-          <button class="btn btn-confirm" id="btnConfirmPermaUnblock">
+        <div class="modal-actions" style="margin-top: 24px;">
+          <button class="btn btn-cancel" id="btnCancelPermaUnblock" style="flex: 1;">Cancel</button>
+          <button class="btn btn-confirm" id="btnConfirmPermaUnblock" style="flex: 2;">
             Request Unblock
           </button>
         </div>

@@ -18,10 +18,12 @@ class TestForcedFocusDaemon(unittest.TestCase):
         forcefocus_daemon.GROUPS_FILE = forcefocus_daemon.CONFIG_DIR / "groups.json"
         forcefocus_daemon.API_TOKEN_FILE = forcefocus_daemon.CONFIG_DIR / "api_token"
         forcefocus_daemon.PERMA_BLOCK_FILE = forcefocus_daemon.CONFIG_DIR / "perma_blocklist.json"
+        forcefocus_daemon.TEMPLATES_FILE = forcefocus_daemon.CONFIG_DIR / "templates.json"
         forcefocus_daemon.HOSTS_PATH = Path("/tmp/hosts")
 
         if not forcefocus_daemon.CONFIG_DIR.exists():
             forcefocus_daemon.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        forcefocus_daemon.TEMPLATES_FILE.write_text(json.dumps({"templates": []}))
 
         # Initialize daemon without starting its threads or hitting filesystem too much
         with patch(
@@ -218,6 +220,86 @@ class TestForcedFocusDaemon(unittest.TestCase):
         result = self.daemon._start_session(cmd)
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["message"], "Invalid mode.")
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._load_groups")
+    def test_templates_create_and_list(self, mock_groups):
+        mock_groups.return_value = {"Work": ["github.com"]}
+
+        result = self.daemon._cmd_add_template(
+            {
+                "name": "Deep Work",
+                "duration_minutes": 90,
+                "mode": "blacklist",
+                "session_type": "standard",
+                "groups": ["Work", "Missing"],
+                "intent": "Write report",
+            }
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["template"]["groups"], ["Work"])
+        listing = self.daemon._cmd_get_templates()
+        self.assertEqual(len(listing["templates"]), 1)
+        self.assertEqual(listing["templates"][0]["name"], "Deep Work")
+
+    def test_templates_reject_invalid_duration(self):
+        result = self.daemon._cmd_add_template(
+            {
+                "name": "Broken",
+                "duration_minutes": 0,
+                "mode": "blacklist",
+                "session_type": "standard",
+            }
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Duration must be 1–1440 minutes.")
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._start_session")
+    def test_start_template_updates_usage(self, mock_start):
+        mock_start.return_value = {"status": "ok", "message": "started"}
+        add_result = self.daemon._cmd_add_template(
+            {
+                "name": "Morning",
+                "duration_minutes": 60,
+                "mode": "whitelist",
+                "session_type": "standard",
+            }
+        )
+        template_id = add_result["template"]["id"]
+
+        result = self.daemon._cmd_start_template({"id": template_id})
+
+        self.assertEqual(result["status"], "ok")
+        mock_start.assert_called_once()
+        payload = mock_start.call_args.args[0]
+        self.assertEqual(payload["mode"], "whitelist")
+        self.assertEqual(payload["duration_minutes"], 60)
+        listing = self.daemon._cmd_get_templates()
+        self.assertEqual(listing["templates"][0]["use_count"], 1)
+        self.assertIsNotNone(listing["templates"][0]["last_used_at"])
+
+    def test_duplicate_and_remove_template(self):
+        add_result = self.daemon._cmd_add_template(
+            {
+                "name": "Original",
+                "duration_minutes": 45,
+                "mode": "blacklist",
+                "session_type": "standard",
+            }
+        )
+        template_id = add_result["template"]["id"]
+
+        duplicate = self.daemon._cmd_duplicate_template({"id": template_id, "name": "Copy"})
+        self.assertEqual(duplicate["status"], "ok")
+        self.assertNotEqual(duplicate["template"]["id"], template_id)
+        self.assertEqual(duplicate["template"]["name"], "Copy")
+
+        remove = self.daemon._cmd_remove_template({"id": template_id})
+        self.assertEqual(remove["status"], "ok")
+        listing = self.daemon._cmd_get_templates()
+        self.assertEqual(len(listing["templates"]), 1)
+        self.assertEqual(listing["templates"][0]["name"], "Copy")
 
     @patch("forcefocus_daemon.subprocess.run")
     @patch("forcefocus_daemon.ForcedFocusDaemon._flush_dns")
@@ -552,6 +634,111 @@ class TestForcedFocusDaemon(unittest.TestCase):
         mock_read_text.return_value = f"{PERMA_MARKER_END}\n127.0.0.1\texample.com\n{PERMA_MARKER_BEGIN}\n"
         self.daemon._watchdog_tick()
         mock_enforce_perma.assert_called_once()
+
+    @patch("forcefocus_daemon.subprocess.run")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_firewall")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._enforce_browser_policies")
+    @patch("forcefocus_daemon.Path.read_text", return_value="original hosts")
+    @patch("forcefocus_daemon.Path.write_text")
+    @patch("forcefocus_daemon.ForcedFocusDaemon._flush_dns")
+    def test_remove_block_during_break(self, mock_flush, mock_write, mock_read, mock_browser, mock_fw, mock_run):
+        # 1. No permanent blocklist -> should disable firewall and browser policies
+        self.daemon.perma_blocklist = []
+        self.daemon.mode = "blacklist"
+        self.daemon._remove_block()
+        
+        mock_fw.assert_called_once_with(False)
+        mock_browser.assert_called_once_with(False)
+        mock_flush.assert_called_once()
+        
+        # 2. With permanent blocklist -> should re-enforce firewall (enable=True)
+        mock_fw.reset_mock()
+        mock_browser.reset_mock()
+        self.daemon.perma_blocklist = ["blocked.com"]
+        self.daemon._remove_block()
+        
+        mock_fw.assert_called_once_with(True)
+        mock_browser.assert_called_once_with(False)
+
+    @patch("forcefocus_daemon.socket.getaddrinfo")
+    @patch("forcefocus_daemon.subprocess.Popen")
+    def test_update_blocked_ips_during_break(self, mock_popen, mock_getaddrinfo):
+        import socket
+        self.daemon.active = True
+        self.daemon.mode = "blacklist"
+        self.daemon.active_domains = ["active.com"]
+        self.daemon.perma_blocklist = ["perma.com"]
+        self.daemon.session_type = "pomodoro"
+        self.daemon.pomo_phase = "break"
+        
+        mock_getaddrinfo.return_value = [(2, 1, 6, "", ("192.168.1.1", 0))]
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = ("stdout", "stderr")
+        mock_popen.return_value = mock_process
+        
+        # Run resolution
+        self.daemon._update_blocked_ips()
+        
+        # Since it is a break, only perma.com should be resolved, active.com should NOT.
+        mock_getaddrinfo.assert_called_once_with("perma.com", None, 0, socket.SOCK_STREAM)
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._update_blocked_ips")
+    @patch("forcefocus_daemon.subprocess.Popen")
+    @patch("forcefocus_daemon.subprocess.run")
+    def test_enforce_firewall_whitelist_during_break(self, mock_run, mock_popen, mock_update_ips):
+        # Test that whitelist port 80/443 blocking is NOT included during break phase
+        self.daemon.active = True
+        self.daemon.mode = "whitelist"
+        self.daemon.session_type = "pomodoro"
+        self.daemon.pomo_phase = "break"
+        
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = ("stdout", "stderr")
+        mock_popen.return_value = mock_process
+        
+        self.daemon._enforce_firewall(True)
+        
+        # Verify the rules sent to pfctl in communicate
+        communicate_call = mock_process.communicate.call_args
+        self.assertIsNotNone(communicate_call)
+        input_data = communicate_call[1].get("input", "")
+        self.assertNotIn("port {80, 443}", input_data)
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._persist_session_lock")
+    def test_cancel_stop_no_active_session(self, mock_persist):
+        self.daemon.active = False
+        self.daemon.pending_unlock_at = datetime.datetime.now()
+        
+        res = self.daemon._cancel_stop()
+        
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["message"], "No active session.")
+        mock_persist.assert_not_called()
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._persist_session_lock")
+    def test_cancel_stop_no_pending_unlock(self, mock_persist):
+        self.daemon.active = True
+        self.daemon.pending_unlock_at = None
+        
+        res = self.daemon._cancel_stop()
+        
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["message"], "No unlock pending.")
+        mock_persist.assert_not_called()
+
+    @patch("forcefocus_daemon.ForcedFocusDaemon._persist_session_lock")
+    def test_cancel_stop_success(self, mock_persist):
+        self.daemon.active = True
+        self.daemon.pending_unlock_at = datetime.datetime.now()
+        self.daemon._mono_unlock_end = 12345.0
+        
+        res = self.daemon._cancel_stop()
+        
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["message"], "Unlock request cancelled. Continuing focus.")
+        self.assertIsNone(self.daemon.pending_unlock_at)
+        self.assertEqual(self.daemon._mono_unlock_end, 0.0)
+        mock_persist.assert_called_once()
 
 
 if __name__ == "__main__":

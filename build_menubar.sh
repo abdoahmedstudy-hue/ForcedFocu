@@ -53,6 +53,11 @@ cat <<EOF > "$PLIST"
     <true/>
     <key>NSUserNotificationUsageDescription</key>
     <string>ForcedFocus needs to show notifications for session updates.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
 EOF

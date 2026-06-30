@@ -25,6 +25,7 @@ from cli.commands.perma_block import cmd_perma_block
 from cli.commands.schedule import cmd_schedule
 from cli.commands.set_key import cmd_set_key
 from cli.commands.web import cmd_web
+from cli.commands.templates import cmd_templates
 
 # Preserve constants for backwards compatibility
 KS_HASH_FILE = Path("/etc/forcefocus/ks_hash")

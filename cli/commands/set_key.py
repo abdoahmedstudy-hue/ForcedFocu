@@ -35,10 +35,19 @@ def cmd_set_key(_args):
 
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         data = {"salt": salt.hex(), "hash": key_hash.hex()}
-        with open(KS_HASH_FILE, "w") as f:
-            json.dump(data, f)
-
-        os.chmod(KS_HASH_FILE, 0o600)
+        temp_path = KS_HASH_FILE.with_suffix(".tmp")
+        try:
+            with open(temp_path, "w") as f:
+                json.dump(data, f)
+            os.chmod(temp_path, 0o600)
+            os.replace(temp_path, KS_HASH_FILE)
+        except Exception:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            raise
         out.print_data(
             {"status": "ok", "message": "Passphrase set successfully."}, title="Set Key"
         )

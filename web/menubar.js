@@ -1,13 +1,18 @@
 const API = "http://127.0.0.1:7070";
 let currentMode = "blacklist";
 let currentType = "standard";
+let doneHoldExpiry = 0;
 let totalSecs = 0;
 let currentRemaining = 0;
-let countdownInterval = null;
+let animationFrameId = null;
 let apiToken = "";
 let selectedGroups = [];
 let availableGroups = {};
+let sessionTemplates = [];
 let isPopoverVisible = false;
+let unlockRemainingSeconds = 0;
+let unlockEndTime = 0;
+let unlockReleaseTime = "";
 
 const AudioManager = {
   settings: {},
@@ -64,6 +69,13 @@ const els = {
   pomoFocus: $("#pomoFocus"),
   pomoBreak: $("#pomoBreak"),
   pomoCycles: $("#pomoCycles"),
+
+  // Block Details State
+  blockDetailsState: $("#blockDetailsState"),
+  mbBtnCancelDetails: $("#mbBtnCancelDetails"),
+  mbBtnConfirmDetails: $("#mbBtnConfirmDetails"),
+  mbBlockDetailsRetry: $("#mbBlockDetailsRetry"),
+
   // Intent UI
   intentState: $("#intentState"),
   intentPromptInput: $("#intentPromptInput"),
@@ -74,59 +86,98 @@ const els = {
   groupSection: $("#groupSection"),
   groupGrid: $("#groupGrid"),
   groupCount: $("#groupCount"),
+  notificationFallback: $("#mbNotificationFallback"),
+  mbTemplatesList: $("#mbTemplatesList"),
+  mbTemplatesCount: $("#mbTemplatesCount"),
 };
 
 const activeRequests = new Map();
 
 async function api(method, path, body = null) {
   const headers = { "Content-Type": "application/json" };
-  if (method !== "GET" && apiToken) headers["X-API-Token"] = apiToken;
+  if (apiToken) headers["X-API-Token"] = apiToken;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
   // Flow Reliability: Prevent GET request race conditions and overlap
-  let requestKey = method + ":" + (path || "");
+  const requestKey = method + ":" + (path || "");
+  let controller = null;
   if (method === "GET") {
     if (activeRequests.has(requestKey)) {
       activeRequests.get(requestKey).abort();
     }
-    const controller = new AbortController();
+    controller = new AbortController();
     opts.signal = controller.signal;
     activeRequests.set(requestKey, controller);
   }
   try {
     const res = await fetch(API + path, opts);
     // S4: Auto-refresh token on 401 (daemon restarted)
-    if (res.status === 401 && method !== "GET") {
+    if (res.status === 401) {
       await loadApiToken();
-      headers["X-API-Token"] = apiToken;
+      if (apiToken) headers["X-API-Token"] = apiToken;
       const retry = await fetch(API + path, {
         method,
         headers,
         body: opts.body,
+        signal: AbortSignal.timeout(5000), // WS1: Prevent indefinite hang on retry
       });
       return await retry.json();
     }
-    const data = await res.json();
-    if (method === "GET") activeRequests.delete(requestKey);
-    return data;
+    return await res.json();
   } catch (err) {
-    if (err.name === "AbortError") return new Promise(() => {});
+    if (err.name === "AbortError") {
+      return { status: "aborted", message: "Request superseded." };
+    }
     return { status: "error", message: "Offline" };
+  } finally {
+    if (method === "GET" && activeRequests.get(requestKey) === controller) {
+      activeRequests.delete(requestKey);
+    }
   }
 }
 
 async function loadApiToken() {
-  try {
-    const res = await fetch(API + "/api/token");
-    const data = await res.json();
-    if (data.token) apiToken = data.token;
-  } catch (e) {
-    console.error("Token load failed:", e);
+  if (window.apiToken) {
+    apiToken = window.apiToken;
   }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sessionStatusMatchesPayload(status, payload) {
+  if (!status || status.status !== "ok") return false;
+  return (
+    status.active === true &&
+    status.mode === payload.mode &&
+    status.session_type === (payload.session_type || "standard")
+  );
+}
+
+function stopStatusConfirmed(status) {
+  return (
+    status &&
+    status.status === "ok" &&
+    (status.active === false || Boolean(status.pending_unlock))
+  );
+}
+
+async function waitForStatusConfirmation(predicate, attempts = 5, delayMs = 200) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const status = await api("GET", "/api/status");
+    if (predicate(status)) {
+      renderStatus(status);
+      return status;
+    }
+    if (attempt < attempts - 1) await delay(delayMs);
+  }
+  return null;
+}
+
 function fmt(secs) {
+  if (secs <= 0) return "Done";
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
@@ -146,61 +197,105 @@ function fmtClock(secs) {
   return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-function updateRing(remMs, isInitial = false) {
+function updateRing(remMs) {
   const circ = 565.48; // 2 * Math.PI * 90
   const totalMs = totalSecs * 1000;
   // Fill the ring clockwise as time passes
   const prog = totalMs > 0 ? 1 - remMs / totalMs : 0;
 
-  if (isInitial) els.progress.style.transition = "none";
   els.progress.style.strokeDasharray = `${Math.max(0, Math.min(1, prog)) * circ} ${circ}`;
   els.progress.style.strokeDashoffset = 0;
-  if (isInitial) {
-    els.progress.offsetHeight; // force reflow
-    els.progress.style.transition = "";
+}
+
+function updateUnlockPendingDisplay() {
+  const mbUnlockInfo = document.getElementById("mbUnlockInfo");
+  if (!mbUnlockInfo || mbUnlockInfo.classList.contains("hidden")) return;
+  
+  const now = Date.now();
+  const remMs = Math.max(0, unlockEndTime - now);
+  const remSecs = Math.ceil(remMs / 1000);
+  
+  let timeStr = "";
+  const m = Math.floor(remSecs / 60);
+  const s = remSecs % 60;
+  if (m > 0) {
+    timeStr = `${m}m ${s}s`;
+  } else {
+    timeStr = `${s}s`;
+  }
+  
+  const p = mbUnlockInfo.querySelector("p");
+  if (p) {
+    p.textContent = `⏱ Unlock pending — releases at ${unlockReleaseTime} (${timeStr} left)`;
   }
 }
 
+function showNotificationFallback(message) {
+  if (!els.notificationFallback) return;
+  if (!message) {
+    els.notificationFallback.classList.add("hidden");
+    els.notificationFallback.textContent = "";
+    return;
+  }
+  els.notificationFallback.textContent = message;
+  els.notificationFallback.classList.remove("hidden");
+}
+
+window.showNotificationFallback = showNotificationFallback;
+
 function startCountdown(rem) {
-  if (countdownInterval && Math.abs(currentRemaining - rem) <= 2) return;
-  if (countdownInterval) clearInterval(countdownInterval);
+  if (animationFrameId && Math.abs(currentRemaining - rem) <= 2) return;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
 
   currentRemaining = rem;
   const startTime = Date.now();
   const durationMs = rem * 1000;
   const endTime = startTime + durationMs;
 
-  let isFirst = true;
+  let lastSecs = -1;
   const tick = () => {
     const now = Date.now();
     const remMs = endTime - now;
 
     if (remMs <= 0) {
-      clearInterval(countdownInterval);
-      countdownInterval = null;
+      animationFrameId = null;
       els.time.textContent = fmt(0);
       updateRing(0);
-      refresh();
+      doneHoldExpiry = Date.now() + 2000;
+      setTimeout(() => refresh(), 2000);
       return;
     }
 
     const remSecs = Math.ceil(remMs / 1000);
     currentRemaining = remSecs; // Update global state for drift guard comparison
-    els.time.textContent = fmt(remSecs);
-    if (els.infoNextTime) els.infoNextTime.textContent = fmtClock(remSecs);
+    
+    // Only update DOM text when second changes
+    if (remSecs !== lastSecs) {
+      els.time.textContent = fmt(remSecs);
+      if (els.infoNextTime) els.infoNextTime.textContent = fmtClock(remSecs);
+      lastSecs = remSecs;
+    }
 
-    updateRing(remMs, isFirst);
-    isFirst = false;
+    updateRing(remMs);
+    updateUnlockPendingDisplay();
+    animationFrameId = requestAnimationFrame(tick);
   };
 
-  tick();
-  countdownInterval = setInterval(tick, 16); // 60fps for buttery smooth movement
+  animationFrameId = requestAnimationFrame(tick);
 }
 
 let isStarting = false;
 
 function renderStatus(data) {
   if (isStarting) return; // Prevent UI jank while daemon applies kernel rules
+  if (Date.now() < doneHoldExpiry) return; // Hold visual Done state for 2s
+  showNotificationFallback(data.notification_warning?.message || "");
+
+  const mbUnlockInfo = document.getElementById("mbUnlockInfo");
+  if (mbUnlockInfo) mbUnlockInfo.classList.add("hidden");
 
   const active = data.active;
   const schedules = data.schedules || [];
@@ -262,6 +357,23 @@ function renderStatus(data) {
           intentContainer.classList.add("hidden");
         }
       }
+      
+      // Handle pending unlock box
+      if (data.pending_unlock) {
+        els.btnStop.classList.add("hidden");
+        const unlockDialog = document.getElementById("unlockDialog");
+        if (unlockDialog) unlockDialog.classList.add("hidden");
+        if (mbUnlockInfo) {
+          mbUnlockInfo.classList.remove("hidden");
+          unlockReleaseTime = data.pending_unlock;
+          unlockRemainingSeconds = data.pending_unlock_seconds || 0;
+          unlockEndTime = Date.now() + unlockRemainingSeconds * 1000;
+          updateUnlockPendingDisplay();
+        }
+      } else {
+        els.btnStop.classList.remove("hidden");
+        if (mbUnlockInfo) mbUnlockInfo.classList.add("hidden");
+      }
     } else {
       // Primary Scheduled
       const nextSch = schedules[0];
@@ -283,6 +395,11 @@ function renderStatus(data) {
       
       const intentContainer = document.getElementById("activeIntentContainer");
       if (intentContainer) intentContainer.classList.add("hidden");
+      
+      els.btnStop.classList.add("hidden");
+      const unlockDialog = document.getElementById("unlockDialog");
+      if (unlockDialog) unlockDialog.classList.add("hidden");
+      if (mbUnlockInfo) mbUnlockInfo.classList.add("hidden");
     }
   } else {
     // We are idle
@@ -293,9 +410,9 @@ function renderStatus(data) {
     }
     els.badgeText.textContent = "Idle";
     els.badge.classList.remove("active");
-    if (countdownInterval) {
-      clearInterval(countdownInterval);
-      countdownInterval = null;
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
   }
 }
@@ -371,6 +488,95 @@ function renderIntentTasks(container, tasks) {
   container.innerHTML = "";
   container.appendChild(ul);
 }
+
+function templateDurationLabel(template) {
+  if (template.session_type === "pomodoro") {
+    return `${template.focus_minutes || 25}/${template.break_minutes || 5} × ${template.cycles || 4}`;
+  }
+  return `${template.duration_minutes || 0}m`;
+}
+
+async function fetchTemplates() {
+  try {
+    const res = await api("GET", "/api/templates");
+    if (res.status === "ok") {
+      sessionTemplates = res.templates || [];
+      renderTemplates();
+    }
+  } catch (e) {
+    console.error("Failed to fetch templates:", e);
+  }
+}
+
+function renderTemplates() {
+  if (!els.mbTemplatesList) return;
+  const section = document.getElementById("mbTemplatesSection");
+  if (!section) return;
+
+  if (els.mbTemplatesCount) els.mbTemplatesCount.textContent = `${sessionTemplates.length} saved`;
+  els.mbTemplatesList.innerHTML = "";
+  
+  if (sessionTemplates.length === 0) {
+    section.classList.add("hidden");
+    return;
+  }
+  
+  section.classList.remove("hidden");
+  
+  sessionTemplates.forEach((template) => {
+    const chip = document.createElement("div");
+    chip.className = "group-chip";
+    chip.textContent = template.name || "Untitled";
+    chip.style.cursor = "pointer";
+    
+    chip.addEventListener("click", () => {
+      // Set Mode
+      currentMode = template.mode || "blacklist";
+      els.modeChips.forEach(b => b.classList.remove("active"));
+      const activeModeBtn = Array.from(els.modeChips).find(b => b.dataset.mode === currentMode);
+      if (activeModeBtn) activeModeBtn.classList.add("active");
+
+      // Set Type
+      currentType = template.session_type || "standard";
+      els.typeChips.forEach(b => b.classList.remove("active"));
+      const activeTypeBtn = Array.from(els.typeChips).find(b => b.dataset.type === currentType);
+      if (activeTypeBtn) activeTypeBtn.classList.add("active");
+
+      if (currentType === "pomodoro") {
+        els.standardSection.classList.add("hidden");
+        els.pomoSection.classList.remove("hidden");
+        
+        els.pomoFocus.value = template.focus_minutes || 25;
+        els.pomoBreak.value = template.break_minutes || 5;
+        els.pomoCycles.value = template.cycles || 4;
+        
+        els.pomoChips.forEach(b => b.classList.remove("active"));
+      } else if (currentType === "rescue") {
+        els.rescueDur.value = template.duration_minutes || 10;
+      } else {
+        els.standardSection.classList.remove("hidden");
+        els.pomoSection.classList.add("hidden");
+        
+        els.durChips.forEach(b => b.classList.remove("active"));
+        els.customMin.value = template.duration_minutes || 60;
+        
+        // Find matching dur chip if exact match
+        const matchingChip = Array.from(els.durChips).find(b => parseInt(b.dataset.min) === (template.duration_minutes || 60));
+        if (matchingChip) {
+          matchingChip.classList.add("active");
+          els.customMin.value = "";
+        }
+      }
+
+      // Set Groups
+      selectedGroups = template.groups || [];
+      renderGroups();
+    });
+    
+    els.mbTemplatesList.appendChild(chip);
+  });
+}
+
 
 async function fetchGroups() {
   try {
@@ -477,14 +683,117 @@ function initEvents() {
     });
   });
 
+  // Block Details ────────────────────────────────────────────────────────────
+
+  function computeBlockDetails() {
+    const blockType = currentMode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+    const sessionLabel = currentType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
+
+    let totalMinutes;
+    let durationText;
+    if (currentType === "pomodoro") {
+      const focusMin = parseInt(els.pomoFocus.value) || 25;
+      const breakMin = parseInt(els.pomoBreak.value) || 5;
+      const cycles = parseInt(els.pomoCycles.value) || 4;
+      totalMinutes = (focusMin + breakMin) * cycles;
+      durationText = `${focusMin}m focus × ${cycles} cycles`;
+    } else {
+      const selectedDurChip = Array.from(els.durChips).find((c) =>
+        c.classList.contains("active")
+      );
+      totalMinutes = selectedDurChip ? parseInt(selectedDurChip.dataset.min) : 120;
+      if (els.customMin.value) {
+        totalMinutes = parseInt(els.customMin.value) || 120;
+      }
+      const hrs = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      durationText = hrs > 0 ? `${hrs}h ${mins > 0 ? mins + "m" : ""}`.trim() : `${mins}m`;
+    }
+
+    const expiryDate = new Date(Date.now() + totalMinutes * 60000);
+    let expiryHrs = expiryDate.getHours();
+    const expiryMins = String(expiryDate.getMinutes()).padStart(2, "0");
+    const ampm = expiryHrs >= 12 ? "PM" : "AM";
+    expiryHrs = expiryHrs % 12 || 12;
+    const expiryText = `${expiryHrs}:${expiryMins} ${ampm}`;
+
+    let domainCount = "—";
+    let groupText = "—";
+    try {
+      const uniqueDomains = new Set();
+      const groupNames = selectedGroups.length > 0
+        ? Array.from(selectedGroups)
+        : Object.keys(availableGroups);
+        
+      if (selectedGroups.length === 0 && Object.keys(availableGroups).length > 0) {
+        groupText = "All Groups";
+      } else if (groupNames.length > 0) {
+        groupText = groupNames.join(", ");
+      }
+
+      for (const name of groupNames) {
+        const domains = availableGroups[name];
+        if (Array.isArray(domains)) {
+          domains.forEach((d) => uniqueDomains.add(d));
+        }
+      }
+      domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
+    } catch {
+      domainCount = "—";
+      groupText = "—";
+    }
+
+    return { blockType, sessionType: sessionLabel, durationText, expiryText, domainCount, groupText };
+  }
+
+  function renderMenubarBlockDetails(details) {
+    const setEl = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+    setEl("mbDetailType", details.blockType);
+    setEl("mbDetailSession", details.sessionType);
+    setEl("mbDetailDuration", details.durationText);
+    setEl("mbDetailExpiry", details.expiryText);
+    setEl("mbDetailGroups", details.groupText);
+    setEl("mbDetailDomains", details.domainCount);
+
+    const errorEl = document.getElementById("mbBlockDetailsError");
+    if (errorEl) errorEl.classList.add("hidden");
+  }
+
   els.btnStart.addEventListener("click", () => {
     els.idleState.classList.add("hidden");
-    els.intentState.classList.remove("hidden");
-    els.intentPromptInput.value = "";
-    const intentTasksInput = document.getElementById("intentTasksInput");
-    if (intentTasksInput) intentTasksInput.value = "";
-    els.intentPromptInput.focus();
+    const details = computeBlockDetails();
+    renderMenubarBlockDetails(details);
+    els.blockDetailsState.classList.remove("hidden");
   });
+
+  if (els.mbBtnCancelDetails) {
+    els.mbBtnCancelDetails.addEventListener("click", () => {
+      els.blockDetailsState.classList.add("hidden");
+      els.idleState.classList.remove("hidden");
+    });
+  }
+
+  if (els.mbBtnConfirmDetails) {
+    els.mbBtnConfirmDetails.addEventListener("click", () => {
+      els.blockDetailsState.classList.add("hidden");
+      els.intentState.classList.remove("hidden");
+      els.intentPromptInput.value = "";
+      const intentTasksInput = document.getElementById("intentTasksInput");
+      if (intentTasksInput) intentTasksInput.value = "";
+      els.intentPromptInput.focus();
+    });
+  }
+
+  if (els.mbBlockDetailsRetry) {
+    els.mbBlockDetailsRetry.addEventListener("click", async () => {
+      await fetchGroups();
+      const details = computeBlockDetails();
+      renderMenubarBlockDetails(details);
+    });
+  }
 
   els.btnIntentCancel.addEventListener("click", () => {
     els.intentState.classList.add("hidden");
@@ -545,18 +854,24 @@ function initEvents() {
     try {
       const res = await api("POST", "/api/start", payload);
       if (res.status === "ok") {
-        refresh();
+        const confirmed = await waitForStatusConfirmation((status) =>
+          sessionStatusMatchesPayload(status, payload),
+        );
+        if (!confirmed) {
+          showNotificationFallback("Session request accepted; waiting for daemon confirmation.");
+        }
       } else {
-        alert(res.message || "Failed to start");
+        showNotificationFallback(res.message || "Failed to start session.");
       }
     } catch (e) {
       console.error("Start failed:", e);
-      alert("Communication failed.");
+      showNotificationFallback("Communication failed.");
     } finally {
       els.btnIntentConfirm.innerHTML = originalIntentHTML;
       els.btnIntentConfirm.disabled = false;
       els.btnIntentConfirm.removeAttribute("aria-busy");
       isStarting = false;
+      refresh();
     }
   });
 
@@ -568,13 +883,21 @@ function initEvents() {
     
     try {
       const dur = parseInt(els.rescueDur.value, 10) || 10;
-      const res = await api("POST", "/api/start", {
+      const payload = {
         duration: dur,
         mode: "whitelist",
         session_type: "rescue",
-      });
+      };
+      const res = await api("POST", "/api/start", payload);
       if (res.status === "ok") {
-        refresh();
+        const confirmed = await waitForStatusConfirmation((status) =>
+          sessionStatusMatchesPayload(status, payload),
+        );
+        if (!confirmed) {
+          showNotificationFallback("Rescue request accepted; waiting for daemon confirmation.");
+        }
+      } else {
+        showNotificationFallback(res.message || "Failed to activate Rescue.");
       }
     } finally {
       els.mbBtnRescue.innerHTML = originalRescueHTML;
@@ -622,8 +945,12 @@ function initEvents() {
       try {
         const res = await api("POST", "/api/stop", { key });
         if (res.status === "pending" || res.status === "ok") {
-          document.getElementById("unlockDialog").classList.add("hidden");
-          refresh();
+          const confirmed = await waitForStatusConfirmation(stopStatusConfirmed);
+          if (confirmed) {
+            document.getElementById("unlockDialog").classList.add("hidden");
+          } else {
+            showNotificationFallback("Unlock accepted; waiting for daemon confirmation.");
+          }
         } else {
           errEl.textContent = res.message || "Invalid passphrase.";
           errEl.classList.remove("hidden");
@@ -647,6 +974,27 @@ function initEvents() {
       if (e.key === "Enter" && btnUnlockConfirm) btnUnlockConfirm.click();
     });
   }
+
+  // Continue Focus (cancel pending unlock)
+  const mbBtnContinueFocus = $("#mbBtnContinueFocus");
+  if (mbBtnContinueFocus) {
+    mbBtnContinueFocus.addEventListener("click", async () => {
+      mbBtnContinueFocus.disabled = true;
+      try {
+        const res = await api("POST", "/api/cancel-stop");
+        if (res.status === "ok") {
+          showNotificationFallback(res.message);
+          refresh();
+        } else {
+          showNotificationFallback("Error: " + res.message);
+        }
+      } catch (err) {
+        showNotificationFallback("Connection failed.");
+      } finally {
+        mbBtnContinueFocus.disabled = false;
+      }
+    });
+  }
 }
 
 let globalPollInterval = null;
@@ -655,9 +1003,11 @@ window.onPopoverShow = () => {
   isPopoverVisible = true;
   loadSettings();
   fetchGroups();
+  fetchTemplates();
   refresh();
   connectSSE();
-  if (!globalPollInterval) globalPollInterval = setInterval(refresh, 1000);
+  // WP1: Reduced from 30s to 2s to make synchronization faster if SSE fails
+  if (!globalPollInterval) globalPollInterval = setInterval(refresh, 2000);
 };
 
 async function loadSettings() {
@@ -674,9 +1024,9 @@ async function loadSettings() {
 window.onPopoverHide = () => {
   isPopoverVisible = false;
   // Keep SSE active to drive the native menubar countdown via nativeCallback
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
   }
   if (globalPollInterval) {
     clearInterval(globalPollInterval);
@@ -690,14 +1040,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   // S8: Load settings and refresh status immediately, don't wait for onPopoverShow
   loadSettings();
   fetchGroups();
+  fetchTemplates();
   // Wait for onPopoverShow to call refresh() and start globalPollInterval.
   // We only connect SSE so the native title updates!
   connectSSE();
 });
 
 let eventSource = null;
+let sseReconnectTimer = null;
+
+function scheduleSSEReconnect() {
+  if (sseReconnectTimer) return;
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    connectSSE();
+  }, 3000);
+}
+
 function connectSSE() {
   if (eventSource && (eventSource.readyState === 0 || eventSource.readyState === 1)) return;
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
   if (eventSource) eventSource.close();
   eventSource = new EventSource(API + "/api/stream");
   
@@ -718,6 +1083,7 @@ function connectSSE() {
   eventSource.onerror = () => {
     console.warn("SSE connection lost. Reconnecting in 3s...");
     eventSource.close();
-    setTimeout(connectSSE, 3000);
+    eventSource = null;
+    scheduleSSEReconnect();
   };
 }

@@ -8,6 +8,7 @@ import { formatTime } from "./shared/utils.js";
 // ── Domain Display ───────────────────────────────────────────────────────────
 const params = new URLSearchParams(window.location.search);
 const domain = params.get("domain") || "this site";
+const originalUrl = params.get("url") || `https://${domain}`;
 document.getElementById("blockedDomain").textContent = domain;
 document.title = `Blocked: ${domain} — ForcedFocus`;
 
@@ -209,9 +210,17 @@ function showPermaBlocked() {
     titleEl.style.backgroundClip = "text";
   }
   if (messageEl) {
-    messageEl.innerHTML =
-      "This site is <strong>permanently blocked</strong> by ForcedFocus.<br />" +
-      "Removal requires passphrase + 30-minute cooling period.";
+    // B4: Safe DOM construction — avoid innerHTML for security consistency
+    messageEl.textContent = "";
+    const line1Start = document.createTextNode("This site is ");
+    const strong = document.createElement("strong");
+    strong.textContent = "permanently blocked";
+    const line1End = document.createTextNode(" by ForcedFocus.");
+    const br = document.createElement("br");
+    const line2 = document.createTextNode(
+      "Removal requires passphrase + 30-minute cooling period."
+    );
+    messageEl.append(line1Start, strong, line1End, br, line2);
   }
   if (badge) {
     badge.textContent = "🔒 Permanently Blocked";
@@ -233,10 +242,16 @@ function showEnded() {
     tickRAF = null;
   }
   if (badge) {
-    badge.textContent = "✅ Session ended — you can close this tab";
+    badge.textContent = "✅ Session ended — redirecting...";
     badge.style.color = "#22c55e";
     badge.style.background = "rgba(34, 197, 94, 0.15)";
     badge.style.boxShadow = "0 0 10px rgba(34, 197, 94, 0.1)";
+  }
+  
+  if (domain !== "all" && domain !== "this site") {
+    setTimeout(() => {
+      window.location.href = originalUrl;
+    }, 1500);
   }
 }
 

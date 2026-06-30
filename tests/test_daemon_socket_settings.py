@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
+import base64
 import json
 import os
 import shutil
@@ -141,7 +142,34 @@ class TestDaemonSocketSettings(unittest.TestCase):
         # and relative_to check will raise ValueError or look for "etcpasswd" in the sounds dir, which won't exist.
         resp = self.daemon._dispatch_command(json.dumps(cmd))
         self.assertEqual(resp["status"], "error")
-        self.assertEqual(resp["message"], "File not found.")
+        self.assertEqual(resp["message"], "Directory traversal detected in filename.")
+
+    def test_upload_sound_accepts_valid_mp3_header(self):
+        payload = base64.b64encode(b"ID3\x04\x00\x00\x00\x00\x00\x00mp3-data").decode("ascii")
+        cmd = {
+            "action": "upload_sound",
+            "filename": "focus.mp3",
+            "data": payload,
+        }
+
+        resp = self.daemon._dispatch_command(json.dumps(cmd))
+
+        self.assertEqual(resp["status"], "ok")
+        self.assertTrue((self.sounds_dir / "focus.mp3").exists())
+
+    def test_upload_sound_rejects_renamed_non_mp3_payload(self):
+        payload = base64.b64encode(b"not actually audio").decode("ascii")
+        cmd = {
+            "action": "upload_sound",
+            "filename": "fake.mp3",
+            "data": payload,
+        }
+
+        resp = self.daemon._dispatch_command(json.dumps(cmd))
+
+        self.assertEqual(resp["status"], "error")
+        self.assertEqual(resp["message"], "Invalid MP3 data.")
+        self.assertFalse((self.sounds_dir / "fake.mp3").exists())
 
 
 if __name__ == "__main__":

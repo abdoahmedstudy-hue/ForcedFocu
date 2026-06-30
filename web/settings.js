@@ -49,46 +49,47 @@ const activeRequests = new Map();
 
 async function api(method, endpoint, body = null) {
   const headers = { "Content-Type": "application/json" };
-  if (method !== "GET" && apiToken) headers["X-API-Token"] = apiToken;
+  if (apiToken) headers["X-API-Token"] = apiToken;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
   // Flow Reliability: Prevent GET request race conditions and overlap
-  let requestKey = method + ":" + (endpoint || "");
+  const requestKey = method + ":" + (endpoint || "");
+  let controller = null;
   if (method === "GET") {
     if (activeRequests.has(requestKey)) {
       activeRequests.get(requestKey).abort();
     }
-    const controller = new AbortController();
+    controller = new AbortController();
     opts.signal = controller.signal;
     activeRequests.set(requestKey, controller);
   }
   try {
     const res = await fetch(endpoint, opts);
     // S4: Auto-refresh token on 401 (daemon restarted)
-    if (res.status === 401 && method !== "GET") {
+    if (res.status === 401) {
       await loadApiToken();
-      headers["X-API-Token"] = apiToken;
+      if (apiToken) headers["X-API-Token"] = apiToken;
       const retry = await fetch(endpoint, { method, headers, body: opts.body });
       return await retry.json();
     }
-    const data = await res.json();
-    if (method === "GET") activeRequests.delete(requestKey);
-    return data;
+    return await res.json();
   } catch (err) {
-    if (err.name === "AbortError") return new Promise(() => {});
+    if (err.name === "AbortError") {
+      return { status: "aborted", message: "Request superseded." };
+    }
     console.error("API Error:", err);
     return { status: "error", message: "Communication failed." };
+  } finally {
+    if (method === "GET" && activeRequests.get(requestKey) === controller) {
+      activeRequests.delete(requestKey);
+    }
   }
 }
 
 async function loadApiToken() {
-  try {
-    const res = await fetch("/api/token");
-    const data = await res.json();
-    if (data.token) apiToken = data.token;
-  } catch (e) {
-    console.error("Token load failed:", e);
+  if (window.apiToken) {
+    apiToken = window.apiToken;
   }
 }
 
@@ -156,6 +157,7 @@ function renderSettings() {
     sound_end: "Session End",
     sound_scheduled: "Scheduled Session",
     sound_blocked: "Blocked Site Access",
+    sound_prayer: "Prayer Mode (Adhan)",
   };
 
   // R7: Use escapeHtml on all user-controlled data
@@ -174,17 +176,37 @@ function renderSettings() {
   }
   els.settingsGrid.innerHTML = html;
 
-  // Notifications
+  // Notifications and Goals
   const intentEnabled = document.getElementById("intentNotifEnabled");
   const intentInterval = document.getElementById("intentNotifInterval");
+  const dailyFocusGoal = document.getElementById("dailyFocusGoalHours");
+  const prayerEnabled = document.getElementById("prayerEnabled");
   if (intentEnabled)
     intentEnabled.checked = settings.intent_notification_enabled !== false;
   if (intentInterval)
     intentInterval.value = settings.intent_notification_interval || 15;
+  if (dailyFocusGoal)
+    dailyFocusGoal.value = settings.daily_focus_goal_hours || "";
+  if (prayerEnabled)
+    prayerEnabled.checked = settings.prayer_enabled !== false;
+
+  // Prayer location status
+  const locationStatus = document.getElementById("locationStatus");
+  if (locationStatus) {
+    const lat = settings.prayer_latitude;
+    const lng = settings.prayer_longitude;
+    if (lat != null && lng != null) {
+      locationStatus.textContent = `📍 ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      locationStatus.style.color = "var(--color-success, #4ade80)";
+    } else {
+      locationStatus.textContent = "⚠️ Not set";
+      locationStatus.style.color = "var(--color-warning, #fbbf24)";
+    }
+  }
 }
 
 async function saveSettings() {
-  const btn = document.querySelector(".settings-footer .primary-btn");
+  const btn = els.btnSaveSettings;
   if (btn) btn.disabled = true;
   const originalText = btn ? btn.textContent : "";
   if (btn) btn.textContent = "Saving...";
@@ -197,10 +219,31 @@ async function saveSettings() {
 
     const intentEnabled = document.getElementById("intentNotifEnabled");
     const intentInterval = document.getElementById("intentNotifInterval");
+    const dailyFocusGoal = document.getElementById("dailyFocusGoalHours");
+    const prayerEnabled = document.getElementById("prayerEnabled");
     if (intentEnabled)
       newSettings.intent_notification_enabled = intentEnabled.checked;
-    if (intentInterval)
-      newSettings.intent_notification_interval = parseInt(intentInterval.value);
+    if (intentInterval) {
+      const parsedInterval = parseInt(intentInterval.value, 10);
+      if (!Number.isInteger(parsedInterval) || parsedInterval < 1 || parsedInterval > 1440) {
+        showToast("Notification interval must be 1-1440 minutes.");
+        btn.textContent = originalText;
+        btn.disabled = false;
+        return;
+      }
+      newSettings.intent_notification_interval = parsedInterval;
+    }
+    if (dailyFocusGoal && dailyFocusGoal.value.trim() !== "") {
+      const parsedHours = parseFloat(dailyFocusGoal.value);
+      if (!isNaN(parsedHours) && parsedHours > 0) {
+        newSettings.daily_focus_goal_hours = parsedHours;
+      }
+    } else if (dailyFocusGoal) {
+      newSettings.daily_focus_goal_hours = 0;
+    }
+    if (prayerEnabled) {
+      newSettings.prayer_enabled = prayerEnabled.checked;
+    }
 
     const res = await api("POST", "/api/settings", { settings: newSettings });
     if (res.status === "ok") {
@@ -216,6 +259,78 @@ async function saveSettings() {
       btn.textContent = originalText;
     }
   }
+}
+
+async function detectLocation() {
+  const btn = document.getElementById("btnDetectLocation");
+  const statusEl = document.getElementById("locationStatus");
+  if (!btn) return;
+
+  if (!navigator.geolocation) {
+    showToast("Geolocation is not supported by your browser.");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Detecting…";
+  if (statusEl) {
+    statusEl.textContent = "🔍 Detecting…";
+    statusEl.style.color = "";
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      try {
+        const res = await api("POST", "/api/settings", {
+          settings: { prayer_latitude: lat, prayer_longitude: lng },
+        });
+        if (res.status === "ok") {
+          settings.prayer_latitude = lat;
+          settings.prayer_longitude = lng;
+          if (statusEl) {
+            statusEl.textContent = `📍 ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            statusEl.style.color = "var(--color-success, #4ade80)";
+          }
+          showToast("Location saved and prayer times updated successfully.");
+        } else {
+          showToast("Error saving location: " + (res.message || "Unknown error"));
+          if (statusEl) {
+            statusEl.textContent = "❌ Save failed";
+            statusEl.style.color = "var(--color-error, #f87171)";
+          }
+        }
+      } catch (e) {
+        showToast("Failed to save location.");
+        if (statusEl) {
+          statusEl.textContent = "❌ Save failed";
+          statusEl.style.color = "var(--color-error, #f87171)";
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "📍 Detect Location";
+      }
+    },
+    (error) => {
+      btn.disabled = false;
+      btn.textContent = "📍 Detect Location";
+      let msg = "Location detection failed.";
+      if (error.code === error.PERMISSION_DENIED) {
+        msg = "Location permission denied. Please allow location access in your browser.";
+      } else if (error.code === error.POSITION_UNAVAILABLE) {
+        msg = "Location information is unavailable.";
+      } else if (error.code === error.TIMEOUT) {
+        msg = "Location request timed out. Try again.";
+      }
+      showToast(msg);
+      if (statusEl) {
+        statusEl.textContent = "⚠️ Not set";
+        statusEl.style.color = "var(--color-warning, #fbbf24)";
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
 }
 
 async function init() {
@@ -238,10 +353,39 @@ async function init() {
     console.error("Init error:", e);
   }
 
+  // Sidebar Navigation Logic
+  const navItems = document.querySelectorAll(".settings-sidebar .nav-item");
+  const panes = document.querySelectorAll(".settings-pane");
+
+  navItems.forEach(item => {
+    item.addEventListener("click", (e) => {
+      e.preventDefault();
+      
+      // Remove active from all nav items
+      navItems.forEach(nav => nav.classList.remove("active"));
+      // Hide all panes
+      panes.forEach(pane => pane.classList.remove("active"));
+      
+      // Add active to clicked item
+      item.classList.add("active");
+      
+      // Show target pane
+      const targetId = item.getAttribute("data-target");
+      const targetPane = document.getElementById(targetId);
+      if (targetPane) {
+        targetPane.classList.add("active");
+      }
+    });
+  });
+
   // Attach event listeners
   els.btnSaveSettings.addEventListener("click", saveSettings);
   els.btnTriggerUpload.addEventListener("click", () => els.fileInput.click());
   els.fileInput.addEventListener("change", handleFileUpload);
+
+  // Prayer location detection
+  const btnDetect = document.getElementById("btnDetectLocation");
+  if (btnDetect) btnDetect.addEventListener("click", detectLocation);
 
   // Sound Library Listeners
   els.soundLibrary.addEventListener("click", (e) => {
@@ -249,7 +393,7 @@ async function init() {
     if (!btn) return;
     const sound = btn.dataset.sound;
     if (btn.classList.contains("play-sound")) playPreview(sound);
-    if (btn.classList.contains("delete-sound")) deleteSound(sound);
+    if (btn.classList.contains("delete-sound")) deleteSound(sound, btn);
   });
 
   els.btnToggleLibrary.addEventListener("click", () => {
@@ -270,7 +414,7 @@ async function init() {
     const action = btn.dataset.action;
     const name = btn.dataset.name;
     if (action === "edit") openGroupModal(name);
-    if (action === "delete") deleteGroup(name);
+    if (action === "delete") deleteGroup(name, btn);
   });
 
   els.settingsGrid.addEventListener("change", (e) => {
@@ -283,7 +427,7 @@ async function init() {
 function renderSoundLibrary() {
   if (availableSounds.length === 0) {
     els.soundLibrary.innerHTML =
-      '<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;">No sounds available.</div>';
+      '<div class="empty-state">No sounds available.</div>';
     return;
   }
 
@@ -293,11 +437,11 @@ function renderSoundLibrary() {
     html += `
             <div class="sound-row">
                 <div class="sound-main">
-                    <button class="btn-icon play-sound" data-sound="${safeSound}" title="Play">▶️</button>
+                    <button class="btn-icon play-sound" data-sound="${safeSound}" title="Play" aria-label="Play ${safeSound}">▶️</button>
                     <div class="sound-info" title="${safeSound}">${safeSound}</div>
                 </div>
                 <div class="sound-actions">
-                    <button class="btn-icon delete delete-sound" data-sound="${safeSound}" title="Delete">🗑️</button>
+                    <button class="btn-icon delete delete-sound" data-sound="${safeSound}" title="Delete" aria-label="Delete ${safeSound}">🗑️</button>
                 </div>
             </div>
         `;
@@ -305,8 +449,9 @@ function renderSoundLibrary() {
   els.soundLibrary.innerHTML = html;
 }
 
-async function deleteSound(filename) {
+async function deleteSound(filename, button = null) {
   if (!confirm(`Delete sound "${filename}"?`)) return;
+  if (button) button.disabled = true;
 
   try {
     const res = await api("POST", "/api/delete-sound", { filename });
@@ -323,13 +468,15 @@ async function deleteSound(filename) {
     }
   } catch (e) {
     showToast("Failed to delete sound.");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
 function renderGroups() {
   if (Object.keys(availableGroups).length === 0) {
     els.groupList.innerHTML =
-      '<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;">No groups created yet.</div>';
+      '<div class="empty-state">No groups created yet.</div>';
     return;
   }
 
@@ -344,8 +491,8 @@ function renderGroups() {
                     <div class="group-meta">${domains.length} domains</div>
                 </div>
                 <div class="group-actions">
-                    <button class="btn-group-action btn-icon" data-action="edit" data-name="${safeName}" title="Edit Group">✏️</button>
-                    <button class="btn-group-action btn-icon delete" data-action="delete" data-name="${safeName}" title="Delete Group">🗑️</button>
+                    <button class="btn-group-action btn-icon" data-action="edit" data-name="${safeName}" title="Edit Group" aria-label="Edit group ${safeName}">✏️</button>
+                    <button class="btn-group-action btn-icon delete" data-action="delete" data-name="${safeName}" title="Delete Group" aria-label="Delete group ${safeName}">🗑️</button>
                 </div>
             </div>
         `;
@@ -380,6 +527,9 @@ async function saveGroup() {
 
   if (domains.length === 0) return showToast("Please add at least one domain.");
 
+  els.btnSaveGroup.disabled = true;
+  const originalText = els.btnSaveGroup.textContent;
+  els.btnSaveGroup.textContent = "Saving...";
   try {
     const res = await api("POST", "/api/groups", { name, domains });
     if (res.status === "ok") {
@@ -396,11 +546,15 @@ async function saveGroup() {
     }
   } catch (e) {
     showToast("Failed to save group.");
+  } finally {
+    els.btnSaveGroup.disabled = false;
+    els.btnSaveGroup.textContent = originalText;
   }
 }
 
-async function deleteGroup(name) {
+async function deleteGroup(name, button = null) {
   if (!confirm(`Delete group "${name}"?`)) return;
+  if (button) button.disabled = true;
 
   try {
     const res = await api("DELETE", `/api/groups/${encodeURIComponent(name)}`);
@@ -413,6 +567,8 @@ async function deleteGroup(name) {
     }
   } catch (e) {
     showToast("Failed to delete group.");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 

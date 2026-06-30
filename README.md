@@ -1,128 +1,206 @@
 # ForcedFocus v2 ⚡
 
-ForcedFocus is a multi-layered, root-level productivity enforcement system for macOS. It combines a system daemon, a native menubar utility, a web dashboard, and a browser extension to create a "defense-in-depth" environment for deep work.
+A root-level, multi-layered productivity enforcement system for macOS designed to lock out distractions at the system core.
 
-## 🗺️ System Architecture
+---
 
-The following map illustrates the synchronization between the orchestration layer (daemon), the user interfaces, and the system-level enforcement.
+## 1. Core Philosophy & Defense in Depth
+
+Modern productivity apps are easily bypassed by disabling browser extensions, editing configuration files, or stopping user-space processes. **ForcedFocus** solves this problem by enforcing focus boundary conditions at the administrative (root) level of macOS.
+
+It acts as a calm command center for high-integrity focus. The interface makes the current protection state obvious, keeps the timer and unlock path prominent, and maintains full usability for managing rules and settings even during active focus sessions.
+
+At its core, a root-level Python daemon manages focus timers and blocks target network requests. It orchestrates system enforcement by:
+- Locking `/etc/hosts` with immutable system flags (`chflags uchg`).
+- Proxying local DNS requests via a loopback port.
+- Dropping QUIC/UDP connections using the macOS native PF Firewall (`pfctl`).
+
+---
+
+## 2. Features
+
+*   **Root-Level System Enforcement**: Redirects blacklisted domains to `127.0.0.1` via `/etc/hosts` and locks the file using the system immutable flag so even `root` cannot modify it during active sessions.
+*   **Local DNS Proxy**: Redirects system DNS configurations to a local proxy server running on Port 53, answering `NXDOMAIN` for unauthorized requests (Whitelist Mode).
+*   **QUIC/UDP Filtering**: Hooks into the native macOS PF Firewall to block UDP port 443, preventing browsers from bypassing local hosts resolutions.
+*   **Browser Extension Lockdown**: A Manifest V3 Chrome Extension utilizing `declarativeNetRequest` dynamic rules, locked against deletion/uninstallation via managed system preferences.
+*   **Live SSE Sync**: All clients (Web Dashboard, Menubar App, Chrome Extension) receive live notifications, state changes, and timer countdown ticks in real-time using **Server-Sent Events** with an SLA of <1 second state synchronization.
+*   **Advanced Focus Modes**: 
+    *   **Pomodoro Mode**: Configurable cycles of focus and breaks.
+    *   **Rescue Mode**: A strict "Nuclear" mode with a mandatory 20-minute delayed bypass passphrase challenge.
+*   **Daemon-Level Audio**: Plays acoustic audio cues directly from the root daemon via `afplay` to bypass standard audio-driver sleep states.
+*   **Recurring Schedules**: Configure automatic start times, repetitions, and advanced domain group rules for completely zero-drift focus routines.
+
+---
+
+## 3. Architecture & System Synchronization
+
+ForcedFocus divides operations across client-facing interfaces, local system orchestration, kernel enforcement mechanisms, and filesystem-level persistence. A rigorous synchronization model ensures that all clients reflect the exact state of the kernel-level daemon in real-time.
+
+### 3.1 Component Stack
+
+*   **Client Layer**:
+    *   **Web Dashboard**: Static Vanilla HTML5 / ES6 JavaScript / Vanilla CSS. Served directly from the daemon on port `7070`.
+    *   **Mac Menubar App**: macOS native Swift app hosting a sandboxed `WKWebView` pointing to the dashboard, with a Swift-native status polling fallback.
+    *   **CLI Utility**: Python 3.13 command-line interface utilizing `Rich` for CLI styling and UNIX Domain Sockets for IPC.
+    *   **Chrome Extension**: Manifest V3 background service worker using `chrome.declarativeNetRequest` for browser-level redirects.
+*   **Orchestration Layer**: Python 3.13 daemon running as root, handling IPC commands over a UNIX domain socket and exposing HTTP REST API/SSE endpoints.
+*   **Enforcement Layer**: MacOS PF Firewall rules (`pfctl`), local system DNS interceptor (`127.0.0.1:53` redirection), and immutable configuration flags (`chflags uchg /etc/hosts`).
+*   **Persistence Layer**: Local JSON schemas (`session.lock`, `lists.json`, `groups.json`, etc.) stored in `/etc/forcefocus/`, utilizing atomic file system swaps for thread-safety without external database dependencies.
+
+### 3.2 State Synchronization & SLAs
+
+To ensure a seamless experience, the daemon acts as the single source of truth and pushes updates to clients using **Server-Sent Events (SSE)**.
+
+**Synchronization SLAs:**
+- **Web Dashboard & Menu Bar**: State reflects within **<= 1 second** of daemon changes via active SSE connections.
+- **Chrome Extension**: Rules and block states are updated within **<= 3 seconds** when the service worker is awake.
+- **Extension Fallback**: In case of service worker suspension or SSE connection loss, a Manifest V3 Alarm triggers a hard sync within **<= 60 seconds**.
+- **State Revisioning**: Any settings or schedule changes increment a global `state_revision` integer. This immediately triggers the `/api/stream` to emit, forcing all listening clients (and the Chrome Extension's cached settings) to refresh.
+
+### 3.3 Architectural Flow
+
+The following diagram illustrates how clients communicate with the daemon and how the daemon enforces state at the system level.
 
 ```mermaid
 graph TB
     subgraph "Client Layer (User Interface)"
-        WebUI["<b>Web Dashboard</b><br/>(React/JS)<br/><i>Polls @ 2.0s</i>"]
-        MacApp["<b>Mac Menubar App</b><br/>(Swift/WKWebView)<br/><i>Polls @ 1.0s / 5.0s</i>"]
-        Extension["<b>Chrome Extension</b><br/>(V3 Service Worker)<br/><i>Polls @ 3.0s</i>"]
-        CLI["<b>Python CLI</b><br/>(Rich/Typer)<br/><i>Direct API calls</i>"]
+        WebUI["<b>Web Dashboard</b><br/>(Vanilla CSS / JS)<br/><i>SSE + HTTP Polling</i>"]
+        MacApp["<b>Mac Menubar App</b><br/>(Swift / WKWebView)<br/><i>SSE + Swift Fallback</i>"]
+        Extension["<b>Chrome Extension</b><br/>(MV3 / Service Worker)<br/><i>Local Storage + API Sync</i>"]
+        CLI["<b>Python CLI</b><br/>(Rich / Argparse)<br/><i>UNIX Socket IPC</i>"]
     end
 
     subgraph "Orchestration Layer (Root)"
-        Daemon["<b>ForcedFocus Daemon</b><br/>(Python 3.13)"]
-        Watchdog["<b>Watchdog Thread</b><br/>(0.25s ticks)"]
-        APIServer["<b>HTTP API Server</b><br/>(Port 7070)"]
+        Daemon["<b>ForcedFocus Daemon</b><br/>(Python 3.13 Daemon)"]
+        Watchdog["<b>Watchdog Thread</b><br/>(0.25s High-Freq Loop)"]
+        APIServer["<b>HTTP API Server</b><br/>(Localhost Port 7070)"]
     end
 
-    subgraph "Enforcement Layer (macOS Kernel/System)"
-        PF["<b>PF Firewall</b><br/>(pfctl rules)"]
-        DNS["<b>Local DNS Proxy</b><br/>(Hijacks Port 53)"]
-        Hosts["<b>/etc/hosts</b><br/>(Immutability via chflags)"]
-        BrowserPolicy["<b>Managed Preferences</b><br/>(Extension Lockdown)"]
+    subgraph "Enforcement Layer (macOS System)"
+        PF["<b>PF Firewall</b><br/>(UDP 443 QUIC Block)"]
+        DNS["<b>DNS Hijack</b><br/>(networksetup redirection)"]
+        Hosts["<b>/etc/hosts</b><br/>(chflags uchg locked)"]
     end
 
-    subgraph "Persistence Layer"
+    subgraph "Persistence Layer (JSON)"
         Lock["session.lock"]
-        Lists["lists.json / groups.json"]
+        Lists["lists.json"]
+        Groups["groups.json"]
         Settings["settings.json"]
+        Perma["perma_blocklist.json"]
     end
 
-    %% Communication Flows
-    WebUI -- "HTTP GET /api/status" --> APIServer
-    MacApp -- "HTTP GET /api/status" --> APIServer
-    Extension -- "HTTP GET /api/status" --> APIServer
-    
-    CLI -- "HTTP POST /api/start" --> APIServer
-    WebUI -- "HTTP POST /api/start" --> APIServer
+    %% Communication
+    CLI -- "UNIX Domain Socket" --> Daemon
+    WebUI -- "REST HTTP / SSE" --> APIServer
+    MacApp -- "REST HTTP / SSE" --> APIServer
+    Extension -- "REST HTTP / status" --> APIServer
 
     APIServer -- "Controls" --> Daemon
     Daemon -- "Manages" --> Watchdog
-    
-    Daemon -- "Writes" --> Lock
-    Daemon -- "Loads" --> Lists
-    Daemon -- "Loads" --> Settings
 
-    %% System Enforcement
-    Watchdog -- "Verifies Integrity" --> Hosts
-    Watchdog -- "Re-enforces" --> PF
-    Daemon -- "Hijacks System DNS" --> DNS
-    Daemon -- "Injects" --> BrowserPolicy
-    
-    %% Notifications
-    Daemon -- "AppleScript (osascript)" --> MacApp
-    MacApp -- "Displays Native Alert" --> SystemAlert["macOS Notification"]
+    %% System Lockdown
+    Watchdog -- "Re-enforces rules" --> PF
+    Watchdog -- "Monitors and locks" --> Hosts
+    Daemon -- "Forwards to Local DNS Proxy" --> DNS
 
-    %% Visual Styling
-    style Daemon fill:#4f46e5,color:#fff,stroke:#312e81,stroke-width:2px
-    style Watchdog fill:#4338ca,color:#fff,stroke:#312e81
-    style APIServer fill:#4338ca,color:#fff,stroke:#312e81
-    style MacApp fill:#0ea5e9,color:#fff
-    style WebUI fill:#0ea5e9,color:#fff
-    style Extension fill:#0ea5e9,color:#fff
-    style DNS fill:#ef4444,color:#fff
-    style PF fill:#ef4444,color:#fff
-    style Hosts fill:#ef4444,color:#fff
+    %% Data Read/Write
+    Daemon -- "Atomic Write" --> Lock
+    Daemon -- "Reads/Saves" --> Lists
+    Daemon -- "Reads/Saves" --> Groups
+    Daemon -- "Reads/Saves" --> Settings
+    Daemon -- "Reads/Saves" --> Perma
 ```
 
-## 🛠️ Core Components
+---
 
-### 1. The Daemon (`forcefocus_daemon.py`)
-The "Source of Truth" for the entire system. Running as root, it manages the session lifecycle, enforces network rules, and provides a local REST API on port 7070.
-*   **Watchdog**: A high-frequency thread (4Hz) that monitors for tampering.
-*   **Atomic Sync**: Uses monotonic clocks and atomic JSON writes to ensure state integrity across reboots.
+## 4. Installation
 
-### 2. Mac Menubar App (`ForcedFocusBar.app`)
-A native Swift utility that provides a persistent countdown in the system bar.
-*   **Native Bridge**: Tunnels daemon notifications through the app to maintain OS-level branding and grouping.
-*   **Adaptive Polling**: Synchronizes its state at 1Hz during sessions and 0.2Hz when idle.
+Setting up ForcedFocus requires root permission to configure the local network layers and install the system daemon.
 
-### 3. Chrome Extension
-The browser-level enforcement layer using Manifest V3.
-*   **DNR Blocking**: Intercepts requests using the `declarativeNetRequest` API for zero-latency blocking.
-*   **Policy Lockdown**: Protected by daemon-injected Managed Preferences to prevent uninstallation.
+### Step 1: Install the Daemon and CLI
+Clone the repository and run the installation script:
+```bash
+git clone https://github.com/your-username/ForcedFocus.git
+cd ForcedFocus
+sudo ./install.sh
+```
+This deploys the daemon, installs the CLI helper into your system path, and sets up `/etc/forcefocus/` config schemas.
 
-### 4. Web Dashboard
-A comprehensive React-based UI for managing domain lists, groups, schedules, and custom audio assets.
+### Step 2: Load the Chrome Extension
+1. Open Google Chrome and navigate to `chrome://extensions/`.
+2. Enable **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the `chrome-extension` directory inside the ForcedFocus project root.
+
+### Step 3: Launch the Menubar Utility
+Double-click `ForcedFocusBar.app` inside the project folder or run:
+```bash
+open ForcedFocusBar.app
+```
 
 ---
 
-## 🛡️ Enforcement Mechanisms
+## 5. Usage
 
-### Blacklist Mode
-*   **DNS Redirection**: Redirects blacklisted domains to `127.0.0.1` via `/etc/hosts`.
-*   **Immutability**: Uses `chflags uchg` to prevent editing of the hosts file.
-*   **QUIC Blocking**: Blocks UDP 443 to force browsers to honor system DNS.
+You can control ForcedFocus through the local Web Dashboard, the CLI utility, or the macOS Menubar popover.
 
-### Whitelist Mode
-*   **Default Deny**: All DNS requests return `NXDOMAIN` unless explicitly allowed.
-*   **DNS Hijacking**: Changes system DNS to `127.0.0.1` via `networksetup`.
-*   **Site Bundles**: Automatically allows required CDNs and asset domains for whitelisted sites.
+### Using the Web Dashboard
+Open your web browser and navigate to the local daemon address:
+```
+http://127.0.0.1:7070
+```
+The **static vanilla JavaScript** dashboard gives you access to full schedule creators, domain group management, sound libraries, and Pomodoro configuration panels.
 
-### Rescue Throne (Nuclear Mode)
-*   **Total Isolation**: A whitelist session with an empty allow-list.
-*   **No Escape**: Enforces a mandatory 20-minute delayed unlock even if the correct bypass code is entered.
+### Using the CLI
+The `forcefocus` command allows direct socket interaction with the system daemon:
+
+*   **Check Daemon Status**:
+    ```bash
+    forcefocus status
+    ```
+*   **Start a Whitelist Session**:
+    ```bash
+    forcefocus start --duration 45 --mode whitelist --groups work
+    ```
+*   **Add a Domain to Permanent Blocklist**:
+    ```bash
+    forcefocus add-domain --list blacklist --domain facebook.com
+    ```
+*   **Stop / Request Session Unlock**:
+    ```bash
+    forcefocus stop
+    ```
+    *Note: If the session is active, this triggers the mandatory 20-minute unlock cooldown verification.*
 
 ---
 
-## 🔄 Synchronization Logic
+## 6. Development & Production Readiness
 
-ForcedFocus uses an **Adaptive Pull Model** to keep all components in sync:
+We maintain strict production-readiness standards. Before any release, the automated test suite and static analysis tools must pass without error. See the [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for full SLA and validation guidelines.
 
-1.  **Audio Sync**: Focus cues are played by the **Daemon** using `afplay`. This ensures alerts play even if the browser is closed or the OS is under heavy load.
-2.  **Intent Sync**: Goals and To-Do tasks are synchronized across all UIs. Checking a task in the browser instantly reflects in the Menubar popover.
-3.  **Schedule Sync**: Scheduled sessions are persisted in `session.lock` and triggered by the Daemon's watchdog based on monotonic time, preventing "drift" from system clock changes.
-4.  **Habit Sync**: Optional audio cues play the moment a blocked site is opened, providing immediate Pavlovian feedback to the user.
+To run the test suite locally:
+```bash
+python3 -m pytest
+node --check web/app.js
+node --check web/settings.js
+swiftc -typecheck forcefocus_menubar.swift
+```
 
-## 🚀 Getting Started
+---
 
-1.  Run `sudo ./install.sh` to install the daemon and CLI.
-2.  Launch `ForcedFocusBar.app` for the menubar interface.
-3.  Install the Chrome Extension from the `chrome-extension` directory.
-4.  Open `http://127.0.0.1:7070` to configure your first session.
+## 7. Contributing
+
+We welcome contributions to help improve ForcedFocus! To report bugs, request features, or submit pull requests, please follow these steps:
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/amazing-feature`.
+3. Add unit tests for your changes and verify against the [Production Readiness Gate](PRODUCTION_READINESS.md).
+4. Commit your changes: `git commit -m 'Add some amazing feature'`.
+5. Push to the branch: `git push origin feature/amazing-feature`.
+6. Open a Pull Request.
+
+---
+
+## 8. License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

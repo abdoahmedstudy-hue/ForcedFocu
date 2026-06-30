@@ -12,6 +12,81 @@ class TestForceFocusWeb(unittest.TestCase):
     def setUp(self):
         pass
 
+    def test_active_focus_does_not_disable_main_ui_cards(self):
+        app_js = Path(__file__).parent.parent / "web" / "app.js"
+        source = app_js.read_text(encoding="utf-8")
+
+        forbidden_patterns = [
+            'modeCard.classList.toggle("disabled", isFullyActive)',
+            'sessionSettingsCard.classList.toggle("disabled", isFullyActive)',
+            'scheduleCard.classList.toggle("disabled", isFullyActive)',
+            'rescueCard.classList.toggle("disabled", isFullyActive)',
+        ]
+        for pattern in forbidden_patterns:
+            self.assertNotIn(pattern, source)
+
+        self.assertIn("function setActiveControlAvailability(isFullyActive)", source)
+        self.assertIn("card.classList.remove(\"disabled\")", source)
+        self.assertIn("btnRescue.disabled = isFullyActive", source)
+
+    def test_design_spec_exists(self):
+        design_md = Path(__file__).parent.parent / "design.md"
+        source = design_md.read_text(encoding="utf-8")
+
+        self.assertIn("ForcedFocus UI/UX Implementation Spec", source)
+        self.assertIn("Product UX Principles", source)
+        self.assertIn("Acceptance Criteria", source)
+
+    def test_required_web_dom_ids_remain_present(self):
+        web_root = Path(__file__).parent.parent / "web"
+        index_source = (web_root / "index.html").read_text(encoding="utf-8")
+        settings_source = (web_root / "settings.html").read_text(encoding="utf-8")
+
+        index_ids = [
+            "timerRing",
+            "timerProgress",
+            "btnStart",
+            "btnStop",
+            "modeCard",
+            "sessionSettingsCard",
+            "scheduleCard",
+            "rescueCard",
+            "templatesList",
+            "sessionGroups",
+            "permaBlockDomains",
+            "blacklistDomains",
+            "whitelistDomains",
+            "recurringSchedulesList",
+            "recurringEditModal",
+            "datetimePickerModal",
+        ]
+        settings_ids = [
+            "settingsGrid",
+            "soundLibrary",
+            "btnSaveSettings",
+            "btnTriggerUpload",
+            "groupList",
+            "btnNewGroup",
+            "groupModal",
+            "groupNameInput",
+            "groupDomainsInput",
+            "intentNotifEnabled",
+            "intentNotifInterval",
+        ]
+
+        for dom_id in index_ids:
+            self.assertIn(f'id="{dom_id}"', index_source)
+        for dom_id in settings_ids:
+            self.assertIn(f'id="{dom_id}"', settings_source)
+
+    def test_dashboard_html_uses_css_classes_instead_of_inline_styles(self):
+        web_root = Path(__file__).parent.parent / "web"
+        index_source = (web_root / "index.html").read_text(encoding="utf-8")
+        settings_source = (web_root / "settings.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("style=", index_source)
+        self.assertNotIn("style=", settings_source)
+
     @patch("socket.socket")
     def test_send_to_daemon_success(self, mock_socket):
         # Setup mock socket
@@ -84,7 +159,12 @@ class TestForcedFocusHandler(unittest.TestCase):
         self.mock_client_address = ("127.0.0.1", 12345)
         self.mock_server = MagicMock()
 
-    def test_is_origin_allowed(self):
+    @patch("forcefocus_web.send_to_daemon")
+    def test_is_origin_allowed(self, mock_send_to_daemon):
+        mock_send_to_daemon.return_value = {
+            "status": "ok",
+            "settings": {"allowed_extension_ids": ["hcgpgflhkpdccdjkkobofpaemcgjmhdc"]},
+        }
         # We need to instantiate the handler without calling __init__ because it blocks
         # handling requests. So we create a mock and bind the methods.
         handler = forcefocus_web.ForcedFocusHandler.__new__(
@@ -99,6 +179,7 @@ class TestForcedFocusHandler(unittest.TestCase):
         handler.headers = {"Origin": "http://localhost:7070"}
         self.assertTrue(handler._is_origin_allowed())
 
+        # Allowed origins
         handler.headers = {"Origin": "http://127.0.0.1:7070"}
         self.assertTrue(handler._is_origin_allowed())
 
@@ -114,7 +195,12 @@ class TestForcedFocusHandler(unittest.TestCase):
         handler.headers = {"Origin": "http://localhost:8080"}
         self.assertFalse(handler._is_origin_allowed())
 
-    def test_get_cors_origin(self):
+    @patch("forcefocus_web.send_to_daemon")
+    def test_get_cors_origin(self, mock_send_to_daemon):
+        mock_send_to_daemon.return_value = {
+            "status": "ok",
+            "settings": {"allowed_extension_ids": ["hcgpgflhkpdccdjkkobofpaemcgjmhdc"]},
+        }
         handler = forcefocus_web.ForcedFocusHandler.__new__(
             forcefocus_web.ForcedFocusHandler
         )

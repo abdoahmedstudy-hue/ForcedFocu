@@ -187,7 +187,7 @@ function showToast(msg, duration = 3000) {
     _toastTimeout = setTimeout(() => {
       els.toast.classList.add("hidden");
       _toastTimeout = null;
-    }, 300);
+    }, 420);
   }, duration);
 }
 
@@ -1434,6 +1434,27 @@ function initEvents() {
   els.stopModal.addEventListener("click", (e) => {
     if (e.target === els.stopModal) els.stopModal.classList.add("hidden");
   });
+
+  // Continue Focus (cancel pending unlock)
+  const btnContinueFocus = $("#btnContinueFocus");
+  if (btnContinueFocus) {
+    btnContinueFocus.addEventListener("click", async () => {
+      btnContinueFocus.disabled = true;
+      try {
+        const res = await api("POST", "/api/cancel-stop");
+        if (res.status === "ok") {
+          showToast(res.message);
+          refreshStatus();
+        } else {
+          showToast("Error: " + res.message);
+        }
+      } catch (err) {
+        showToast("Connection failed.");
+      } finally {
+        btnContinueFocus.disabled = false;
+      }
+    });
+  }
 
   // Add domain: blacklist
   $("#btnAddBlacklist").addEventListener("click", () => addDomain("blacklist"));

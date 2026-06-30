@@ -196,6 +196,7 @@ class TestForceFocusCLISetKey(unittest.TestCase):
     @patch("forcefocus_cli.os.urandom")
     @patch("forcefocus_cli.json.dump")
     @patch("forcefocus_cli.os.chmod")
+    @patch("forcefocus_cli.os.replace")
     @patch("builtins.open", new_callable=unittest.mock.mock_open)
     @patch("forcefocus_cli.out.print_data")
     @patch("pathlib.Path.mkdir")
@@ -204,6 +205,7 @@ class TestForceFocusCLISetKey(unittest.TestCase):
         mock_mkdir,
         mock_print_data,
         mock_open,
+        mock_replace,
         mock_chmod,
         mock_json_dump,
         mock_urandom,
@@ -218,9 +220,11 @@ class TestForceFocusCLISetKey(unittest.TestCase):
         forcefocus_cli.cmd_set_key(None)
 
         mock_mkdir.assert_called_with(parents=True, exist_ok=True)
-        mock_open.assert_called_with(forcefocus_cli.KS_HASH_FILE, "w")
+        temp_path = forcefocus_cli.KS_HASH_FILE.with_suffix(".tmp")
+        mock_open.assert_called_with(temp_path, "w")
         mock_json_dump.assert_called_once()
-        mock_chmod.assert_called_with(forcefocus_cli.KS_HASH_FILE, 0o600)
+        mock_chmod.assert_called_with(temp_path, 0o600)
+        mock_replace.assert_called_with(temp_path, forcefocus_cli.KS_HASH_FILE)
         mock_print_data.assert_called_with(
             {"status": "ok", "message": "Passphrase set successfully."}, title="Set Key"
         )

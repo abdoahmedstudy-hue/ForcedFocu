@@ -26,6 +26,8 @@ HOSTS_PATH="/private/etc/hosts"
 
 MARKER_BEGIN="# ──── BEGIN FORCEFOCUS ────"
 MARKER_END="# ──── END FORCEFOCUS ────"
+PERMA_MARKER_BEGIN="# ──── BEGIN FORCEFOCUS PERMANENT ────"
+PERMA_MARKER_END="# ──── END FORCEFOCUS PERMANENT ────"
 
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -112,8 +114,8 @@ chflags nouchg "$HOSTS_PATH" 2>/dev/null || true
 
 # ── Strip ForcedFocus block from /etc/hosts ───────────────────────────────────
 echo -e "${CYAN}  Restoring /etc/hosts...${NC}"
-if grep -q "$MARKER_BEGIN" "$HOSTS_PATH" 2>/dev/null; then
-    # Use sed to remove the block (inclusive of markers)
+if grep -q "BEGIN FORCEFOCUS" "$HOSTS_PATH" 2>/dev/null; then
+    # Use python to remove the blocks (inclusive of markers)
     $PYTHON_BIN -c "
 from pathlib import Path
 hosts = Path('${HOSTS_PATH}')
@@ -122,10 +124,10 @@ lines = content.split('\n')
 result = []
 inside = False
 for line in lines:
-    if '${MARKER_BEGIN}' in line:
+    if '${MARKER_BEGIN}' in line or '${PERMA_MARKER_BEGIN}' in line:
         inside = True
         continue
-    if '${MARKER_END}' in line:
+    if '${MARKER_END}' in line or '${PERMA_MARKER_END}' in line:
         inside = False
         continue
     if not inside:
@@ -187,8 +189,9 @@ if [[ -d "$CONFIG_DIR" ]]; then
         echo -e "${YELLOW}  ⚠ ${BACKUP_COUNT} hosts backup(s) moved to: ${BACKUP_DST}${NC}"
     fi
 
-    rm -rf "$CONFIG_DIR"
-    echo -e "    Removed: ${CONFIG_DIR}"
+    # Remove only runtime files, preserve user configuration (JSON files)
+    rm -f "$CONFIG_DIR"/api_token "$CONFIG_DIR"/ks_hash "$CONFIG_DIR"/user "$CONFIG_DIR"/session.lock
+    echo -e "    Removed: Runtime files from ${CONFIG_DIR} (preserved user data)"
 fi
 
 # ── Remove log files ─────────────────────────────────────────────────────────
