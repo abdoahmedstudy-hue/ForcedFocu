@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ForcedFocus Daemon v2 — Root-level macOS website blocker.
+ForcedFocus Daemon v3 — Root-level macOS website blocker.
 
 Supports blacklist mode (block listed sites) and whitelist mode
 (allow ONLY listed sites by redirecting DNS + pinning IPs).
@@ -495,14 +495,14 @@ class LocalDNSProxy(threading.Thread):
             return
 
         logging.info("DNS Proxy listening on 127.0.0.1:53 and ::1:53")
-        while self.active:
+        while self.running:
             try:
                 # Ensure sockets are still open before select
                 valid_socks = [s for s in self.socks if s.fileno() != -1]
                 if not valid_socks:
                     break
                 r, _, _ = select.select(valid_socks, [], [], 1.0)
-                if not r or not self.active:
+                if not r or not self.running:
                     continue
                 for s in r:
                     try:
@@ -513,52 +513,53 @@ class LocalDNSProxy(threading.Thread):
                     except (OSError, ValueError):
                         continue
             except Exception as exc:
-                if self.active:  # Only log if we didn't intend to stop
+                if self.running:  # Only log if we didn't intend to stop
                     logging.error("DNS Proxy loop error: %s", exc)
 
     def stop(self):
-        self.active = False
+        self.running = False
+        for s in getattr(self, "socks", []):
+            try:
+                s.close()
+            except OSError:
+                pass
         try:
             self.executor.shutdown(wait=False)
         except Exception:
-            pass
-        try:
-            for s in getattr(self, "socks", []):
-                s.close()
-        except OSError:
             pass
 
     def _extract_domain(self, data: bytes) -> str:
         parts = []
         idx = 12
-        try:
-            while idx < len(data) and data[idx] != 0:
-                length = data[idx]
-                # If it's a pointer (starts with 11 bits), stop here
-                if (length & 0xC0) == 0xC0:
-                    break
-                parts.append(data[idx + 1 : idx + 1 + length].decode("utf-8"))
-                idx += 1 + length
-            return ".".join(parts).lower()
-        except Exception:
-            return ""
+        while idx < len(data):
+            length = data[idx]
+            if length == 0:
+                break
+            if (length & 0xC0) == 0xC0:
+                break
+            if idx + 1 + length > len(data):
+                break
+            parts.append(data[idx + 1 : idx + 1 + length].decode("utf-8", errors="replace"))
+            idx += 1 + length
+        return ".".join(parts).lower()
 
-    def _make_nxdomain(self, query: bytes) -> bytes:
+    def _make_nxdomain(self, data: bytes) -> bytes:
         try:
-            hdr = struct.unpack("!HHHHHH", query[:12])
-            flags = (hdr[1] | 0x8000) & 0xFE00
+            hdr = struct.unpack("!HHHHHH", data[:12])
+            flags = (hdr[1] | 0x8000) & 0xFF00
             flags = flags | 0x0080 | 3
+            resp_hdr = struct.pack("!HHHHHH", hdr[0], flags, hdr[2], 0, 0, 0)
+            
             idx = 12
-            while idx < len(query) and query[idx] != 0:
-                idx += 1 + query[idx]
+            while idx < len(data) and data[idx] != 0:
+                idx += 1 + data[idx]
             idx += 5
             
             # Additional bounds check for malformed queries
-            if idx > len(query):
+            if idx > len(data):
                 return b""
                 
-            resp_hdr = struct.pack("!HHHHHH", hdr[0], flags, hdr[2], 0, 0, 0)
-            return resp_hdr + query[12:idx]
+            return resp_hdr + data[12:idx]
         except Exception:
             return b""
 
@@ -571,11 +572,17 @@ class LocalDNSProxy(threading.Thread):
         if domain == "localhost" or domain.endswith(".local"):
             allowed = True
         else:
+            in_set = False
             parts = domain.split(".")
             for i in range(len(parts)):
                 if ".".join(parts[i:]) in self.ff_daemon.active_domains_set:
-                    allowed = True
+                    in_set = True
                     break
+            
+            if getattr(self.ff_daemon, "mode", "blacklist") == "blacklist":
+                allowed = not in_set
+            else:
+                allowed = in_set
 
         if allowed:
             self.executor.submit(self._forward_query, data, addr, sock)
@@ -860,9 +867,13 @@ class PrayerManager:
         daemon.broadcast_state_changed()
         logging.info("Resumed suspended session (%s mode, %d sec remaining).", daemon.mode, int(remaining))
 
-    def start_prayer_rescue(self, prayer_name: str) -> None:
+    def start_prayer_rescue(self, prayer_name: str):
         daemon = self.daemon
         with daemon.lock:
+            self._prayer_active = True
+            self._current_prayer_name = prayer_name
+            self._mono_prayer_end = get_continuous_time() + PRAYER_DURATION_S
+            self._skipped_prayers.add(prayer_name)
             daemon._play_sound("prayer")
             daemon._send_mac_notification(
                 f"🕌 {prayer_name} Prayer Time",
@@ -1043,7 +1054,7 @@ class ForcedFocusDaemon:
 
     def run(self):
         setup_logging()
-        logging.info("ForcedFocus daemon v2 starting (PID %d).", os.getpid())
+        logging.info("ForcedFocus daemon v3 starting (PID %d).", os.getpid())
         self._ensure_config_dir()
         self._ensure_lists_file()
         self._ensure_groups_file()
@@ -3439,7 +3450,7 @@ class ForcedFocusDaemon:
 
     def _start_dns_proxy(self):
         """Start the local DNS proxy for whitelist-mode domain filtering."""
-        if self.dns_proxy and self.dns_proxy.is_alive():
+        if self.dns_proxy and self.dns_proxy.running:
             return
         self.dns_proxy = LocalDNSProxy(self)
         self.dns_proxy.start()
@@ -3986,7 +3997,9 @@ class ForcedFocusDaemon:
             
             def _resolve_and_update(domains, backlog):
                 if not domains:
-                    backlog.clear()
+                    is_break = getattr(self, "session_type", "") == "pomodoro" and getattr(self, "pomo_phase", "") == "break"
+                    if not is_break:
+                        backlog.clear()
                     return []
                 new_ips = set()
                 for domain in domains:
@@ -4438,6 +4451,14 @@ class ForcedFocusDaemon:
                     if v < -180 or v > 180:
                         return False, "prayer_longitude must be between -180 and 180", {}
                 validated[k] = v
+            elif k in ("prayer_enabled", "aggressive_cache_clear"):
+                if isinstance(v, str):
+                    validated[k] = v.lower() == "true"
+                else:
+                    validated[k] = bool(v)
+            elif k == "schedules":
+                if isinstance(v, list):
+                    validated[k] = v
                 
         return True, "", validated
 
@@ -4468,8 +4489,9 @@ class ForcedFocusDaemon:
                 fetch_success = self.prayer_manager.fetch_today()
                 if not fetch_success:
                     return {
-                        "status": "error",
-                        "message": "Saved location, but Aladhan API failed to fetch prayer times. Coordinates may be invalid."
+                        "status": "warning",
+                        "message": "Saved location, but Aladhan API failed to fetch prayer times. Please check your internet connection and try again.",
+                        "settings": validated_settings
                     }
 
             self.broadcast_state_changed()
@@ -4997,7 +5019,7 @@ class ForcedFocusDaemon:
                         timeout=2,
                     )
                     # Check for '443' and 'udp' in ruleset output
-                    if "443" not in res.stdout or "udp" not in res.stdout:
+                    if not re.search(r'\b443\b', res.stdout) or not re.search(r'\budp\b', res.stdout):
                         logging.warning(
                             "FIREWALL TAMPER DETECTED. Rules: '%s'. Re-enforcing.",
                             res.stdout.strip(),

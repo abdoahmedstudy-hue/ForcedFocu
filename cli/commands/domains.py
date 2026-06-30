@@ -38,9 +38,11 @@ def cmd_domains(args):
 
         if not list_name or list_name not in ("blacklist", "whitelist"):
             out.print_error("List must be 'blacklist' or 'whitelist'.", code="USAGE_ERROR")
+            return
 
         if not domains:
             out.print_error("At least one domain must be provided.", code="USAGE_ERROR")
+            return
 
         if len(domains) == 1:
             payload = {
@@ -64,9 +66,11 @@ def cmd_domains(args):
 
         if not list_name or list_name not in ("blacklist", "whitelist"):
             out.print_error("List must be 'blacklist' or 'whitelist'.", code="USAGE_ERROR")
+            return
 
         if not domain:
             out.print_error("Domain must be provided.", code="USAGE_ERROR")
+            return
 
         payload = {
             "action": "remove_domain",

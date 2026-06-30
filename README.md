@@ -1,4 +1,4 @@
-# ForcedFocus v2 ⚡
+# ForcedFocus v3 ⚡
 
 A root-level, multi-layered productivity enforcement system for macOS designed to lock out distractions at the system core.
 
