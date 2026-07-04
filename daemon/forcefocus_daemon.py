@@ -890,7 +890,7 @@ class ForcedFocusDaemon:
         session_type = raw.get("session_type", template.get("session_type", "standard"))
         if session_type == "rescue":
             mode = "whitelist"
-        if mode not in ("blacklist", "whitelist"):
+        if mode not in ("blacklist", "whitelist", "ban"):
             return False, "Invalid mode.", {}
         if session_type not in ("standard", "pomodoro", "rescue"):
             return False, "Invalid session type.", {}
@@ -1659,7 +1659,7 @@ class ForcedFocusDaemon:
         if datetime.now() >= expiry:
             logging.info("Persisted session expired. Cleaning up.")
             self.mode = data.get("mode", "blacklist")
-            if self.mode == "whitelist":
+            if self.mode in ("whitelist", "ban"):
                 self.original_dns = data.get("original_dns", {})
             self._cleanup_session()
             return
@@ -1701,7 +1701,7 @@ class ForcedFocusDaemon:
             )
             if unlock_remaining <= 0:
                 logging.info("Pending unlock expired during downtime. Ending session.")
-                if self.mode == "whitelist":
+                if self.mode in ("whitelist", "ban"):
                     self.original_dns = data.get("original_dns", {})
                 self._cleanup_session()
                 return
@@ -1732,11 +1732,13 @@ class ForcedFocusDaemon:
         self.session_group_id = data.get("session_group_id")
         self.active = True
 
-        if self.mode == "whitelist":
+        if self.mode in ("whitelist", "ban"):
             self.original_dns = data.get("original_dns", {})
             self.active_domains = data.get(
                 "active_domains", data.get("blocked_domains", [])
             )
+            if self.mode == "ban":
+                self.active_domains = []
             self.active_domains_set = set(self.active_domains)
             self.whitelist_resolved = data.get("whitelist_resolved", {})
             self.whitelist_count = data.get("whitelist_count", len(self.active_domains))
@@ -1763,7 +1765,7 @@ class ForcedFocusDaemon:
                 return
 
         is_break = self.session_type == "pomodoro" and self.pomo_phase == "break"
-        if self.mode == "whitelist":
+        if self.mode in ("whitelist", "ban"):
             if not is_break:
                 self._enforce_whitelist()
         else:
@@ -1801,7 +1803,7 @@ class ForcedFocusDaemon:
             return {"status": "error", "message": "Invalid duration."}
         if duration_minutes < 1 or duration_minutes > 1440:
             return {"status": "error", "message": "Duration must be 1–1440 minutes."}
-        if mode not in ("blacklist", "whitelist"):
+        if mode not in ("blacklist", "whitelist", "ban"):
             return {"status": "error", "message": "Invalid mode."}
         with self.lock:
             # Parse scheduling arguments
@@ -2030,9 +2032,9 @@ class ForcedFocusDaemon:
 
             selected_groups = cmd.get("groups", [])
             self.session_groups = list(selected_groups)
-            if mode == "whitelist":
+            if mode in ("whitelist", "ban"):
                 self.original_dns = self._get_current_dns_servers()
-                if self.session_type == "rescue":
+                if self.session_type == "rescue" or mode == "ban":
                     wl_domains = []
                 else:
                     wl_domains = self._load_lists().get("whitelist", [])
@@ -2046,7 +2048,7 @@ class ForcedFocusDaemon:
                 )
 
                 # Whitelist mode: active_domains holds the ALLOW-list.
-                if self.session_type == "rescue":
+                if self.session_type == "rescue" or mode == "ban":
                     wl_domains_expanded = []
                 else:
                     wl_domains_expanded = self._expand_whitelist_domains(wl_domains)
@@ -2067,6 +2069,11 @@ class ForcedFocusDaemon:
                     msg = f"Pomodoro (Whitelist): {count} domains allowed ({expanded_count} total with CDNs) for {self.pomo_total_cycles} cycles."
                 elif self.session_type == "rescue":
                     msg = f"Rescue Throne activated: All sites blocked for {duration_minutes} min."
+                elif mode == "ban":
+                    if self.session_type == "pomodoro":
+                        msg = f"Pomodoro (Ban): All sites blocked for {self.pomo_total_cycles} cycles."
+                    else:
+                        msg = f"Ban mode: All sites blocked for {duration_minutes} min."
                 else:
                     msg = f"Whitelist mode: {count} domains allowed ({expanded_count} total with CDNs) for {duration_minutes} min."
             else:
@@ -2271,7 +2278,7 @@ class ForcedFocusDaemon:
         session_type = cmd.get("session_type", rule.get("session_type", "standard"))
         if session_type == "rescue":
             mode = "whitelist"
-        if mode not in ("blacklist", "whitelist"):
+        if mode not in ("blacklist", "whitelist", "ban"):
             return False, "Invalid mode.", {}
         if session_type not in ("standard", "pomodoro", "rescue"):
             return False, "Invalid session type.", {}
@@ -3025,7 +3032,13 @@ class ForcedFocusDaemon:
                     text=True,
                     timeout=5,
                 )
-                return svc, dns_out.stdout.strip()
+                dns_raw = dns_out.stdout.strip()
+                filtered = [s for s in dns_raw.split("\n") if s not in ("127.0.0.1", "::1", "localhost")]
+                if not filtered or "There aren't any DNS Servers" in dns_raw:
+                    dns_str = "There aren't any DNS Servers"
+                else:
+                    dns_str = "\n".join(filtered)
+                return svc, dns_str
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(services) if services else 1)) as executor:
                 futures = {executor.submit(get_dns, svc): svc for svc in services}
@@ -3051,10 +3064,10 @@ class ForcedFocusDaemon:
                     self._start_sni_proxy()
 
                 # 2. Re-route system DNS to our proxy (localhost)
-                self._route_dns_to_proxy()
+                self._set_dns_to_localhost()
 
-                # 3. Clean /etc/hosts (we don't need 127.0.0.1 blocks in whitelist mode)
-                self._restore_hosts()
+                # 3. Block DNS-over-HTTPS providers in /etc/hosts (anti-bypass)
+                self._enforce_doh_block()
 
                 # 4. Enforce strict PF firewall whitelist
                 self._enforce_firewall(True)
@@ -3165,9 +3178,16 @@ class ForcedFocusDaemon:
                             timeout=5,
                         )
                     else:
-                        servers = dns_str.strip().split("\n")
-                        result = subprocess.run(
-                            ["networksetup", "-setdnsservers", svc] + servers,
+                        servers = [s for s in dns_str.strip().split("\n") if s not in ("127.0.0.1", "::1", "localhost")]
+                        if not servers:
+                            result = subprocess.run(
+                                ["networksetup", "-setdnsservers", svc, "empty"],
+                                capture_output=True,
+                                timeout=5,
+                            )
+                        else:
+                            result = subprocess.run(
+                                ["networksetup", "-setdnsservers", svc] + servers,
                             capture_output=True,
                             timeout=5,
                         )
@@ -3189,6 +3209,14 @@ class ForcedFocusDaemon:
             logging.info("DNS servers restored for %d services.", success_count)
         except Exception as exc:
             logging.error("Critical failure restoring DNS: %s", exc)
+    def _start_dns_proxy(self):
+        """Start the local DNS proxy."""
+        try:
+            if not getattr(self, "dns_proxy", None):
+                self.dns_proxy = LocalDNSProxy(self)
+                self.dns_proxy.start()
+        except Exception as exc:
+            logging.error("Failed to start DNS proxy: %s", exc)
 
     def _start_sni_proxy(self):
         """Start the transparent SNI proxy."""
@@ -3288,7 +3316,7 @@ class ForcedFocusDaemon:
             logging.error("Failed to send native notification: %s", e)
 
     def _enforce_current_mode(self):
-        if self.mode == "whitelist":
+        if self.mode in ("whitelist", "ban"):
             threading.Thread(target=self._enforce_whitelist, daemon=True).start()
         else:
             threading.Thread(target=self._enforce_block, daemon=True).start()
@@ -3302,7 +3330,7 @@ class ForcedFocusDaemon:
             content = self._strip_block(HOSTS_PATH.read_text())
             HOSTS_PATH.write_text(content)
             self.hosts_hash = None
-            if self.mode == "whitelist":
+            if self.mode in ("whitelist", "ban"):
                 if self.dns_proxy:
                     self.dns_proxy.stop()
                     self.dns_proxy = None
@@ -3409,7 +3437,8 @@ class ForcedFocusDaemon:
             self._send_mac_notification(
                 "Session Complete", "Great job! Your ForcedFocus session has ended."
             )
-            was_whitelist = self.mode == "whitelist"
+            self.active = False  # Ensure firewall logic knows session is ending
+            was_whitelist = self.mode in ("whitelist", "ban")
 
             try:
                 subprocess.run(
@@ -3438,7 +3467,6 @@ class ForcedFocusDaemon:
             except Exception as exc:
                 logging.error("Failed to record session history: %s", exc)
 
-            self.active = False
 
             if getattr(self, "schedules", []) or self.recurring_schedules:
                 self._persist_session_lock()
@@ -3584,7 +3612,7 @@ class ForcedFocusDaemon:
             if self.active and not is_break:
                 if self.mode == "blacklist":
                     domains_to_resolve_blocks.update(self.active_domains)
-                elif self.mode == "whitelist":
+                elif self.mode in ("whitelist", "ban"):
                     domains_to_resolve_whitelist.update(self.active_domains)
             
             if not domains_to_resolve_blocks and not domains_to_resolve_whitelist:
@@ -3685,7 +3713,7 @@ class ForcedFocusDaemon:
                 )
 
                 is_break = self.session_type == "pomodoro" and self.pomo_phase == "break"
-                if self.active and self.mode == "whitelist" and not is_break:
+                if self.active and self.mode in ("whitelist", "ban") and not is_break:
                     active_iface = self._get_active_interface()
                     rules.extend(
                         [
@@ -3927,7 +3955,7 @@ class ForcedFocusDaemon:
                         ),
                     }
                 )
-            if self.mode == "whitelist":
+            if self.mode in ("whitelist", "ban"):
                 data["original_dns"] = self.original_dns
                 data["whitelist_resolved"] = self.whitelist_resolved
                 data["active_domains"] = self.active_domains
@@ -4478,7 +4506,7 @@ class ForcedFocusDaemon:
             # Integrity check: /etc/hosts (blacklist mode only)
             # ⚡ Two-tier check: fast stat() pre-check (~2μs) gates expensive
             #    read+SHA256 (~200μs). Eliminates ~99% of unnecessary disk I/O.
-            if self.mode != "whitelist":
+            if self.mode not in ("whitelist", "ban"):
                 try:
                     st = HOSTS_PATH.stat()
                     current_stat = (st.st_mtime, st.st_size)
@@ -4516,7 +4544,7 @@ class ForcedFocusDaemon:
                         upstream = (
                             self.dns_proxy.upstream_dns
                             if (
-                                self.mode == "whitelist"
+                                self.mode in ("whitelist", "ban")
                                 and getattr(self, "dns_proxy", None)
                             )
                             else None
@@ -4530,13 +4558,13 @@ class ForcedFocusDaemon:
                 logging.warning("SESSION.LOCK DELETED. Re-creating from memory.")
                 self._persist_session_lock()
                 # Also re-enforce block since file was tampered
-                if self.mode == "whitelist":
+                if self.mode in ("whitelist", "ban"):
                     self._enforce_whitelist()
                 else:
                     self._enforce_block()
 
             # Integrity check: DNS (whitelist mode, every ~30 seconds)
-            if self.mode == "whitelist":
+            if self.mode in ("whitelist", "ban"):
                 if (
                     self.dns_proxy
                     and not self.dns_proxy.is_alive()

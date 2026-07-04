@@ -538,7 +538,7 @@ function renderGroups() {
   if (!els.groupGrid || !els.groupSection) return;
 
   const names = Object.keys(availableGroups);
-  if (names.length === 0) {
+  if (names.length === 0 || currentMode === "ban") {
     els.groupSection.classList.add("hidden");
     return;
   }
@@ -584,6 +584,8 @@ function initEvents() {
       els.modeChips.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       currentMode = btn.dataset.mode;
+      renderGroups();
+      updateBlockDetails();
     });
   });
 
@@ -630,7 +632,7 @@ function initEvents() {
   // Block Details ────────────────────────────────────────────────────────────
 
   function computeBlockDetails() {
-    const blockType = currentMode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+    const blockType = currentMode === "whitelist" ? "✅ Whitelist" : currentMode === "ban" ? "⛔ Ban" : "🚫 Blacklist";
     const sessionLabel = currentType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
 
     let totalMinutes;

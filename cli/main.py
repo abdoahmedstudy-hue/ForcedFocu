@@ -75,7 +75,7 @@ def build_parser():
     p_start.add_argument(
         "--mode",
         "-m",
-        choices=["blacklist", "whitelist"],
+        choices=["blacklist", "whitelist", "ban"],
         default="blacklist",
         help="Blocking mode",
     )
@@ -191,7 +191,7 @@ def build_parser():
     p_sched_add.add_argument("--days", help="Comma separated days (0=Mon, 6=Sun)")
     p_sched_add.add_argument("--time", help="Start time HH:MM")
     p_sched_add.add_argument("--duration", type=int, default=120, help="Duration in minutes")
-    p_sched_add.add_argument("--mode", default="blacklist", help="Mode")
+    p_sched_add.add_argument("--mode", choices=["blacklist", "whitelist", "ban"], default="blacklist", help="Mode")
     p_sched_add.add_argument(
         "--type",
         dest="session_type",
@@ -227,7 +227,7 @@ def build_parser():
     p_sched_edit.add_argument("--days", help="Comma separated days (0=Mon, 6=Sun)")
     p_sched_edit.add_argument("--time", help="Start time HH:MM")
     p_sched_edit.add_argument("--duration", type=int, help="Duration in minutes")
-    p_sched_edit.add_argument("--mode", choices=["blacklist", "whitelist"], help="Mode")
+    p_sched_edit.add_argument("--mode", choices=["blacklist", "whitelist", "ban"], help="Mode")
     p_sched_edit.add_argument("--type", dest="session_type", choices=["standard", "pomodoro", "rescue"], help="Session type")
     p_sched_edit.add_argument("--focus", type=int, help="Pomodoro focus minutes")
     p_sched_edit.add_argument("--break", dest="break_time", type=int, help="Pomodoro break minutes")
@@ -339,7 +339,7 @@ def build_parser():
     p_tpl_add = sub_templates.add_parser("add", help="Create a session template")
     p_tpl_add.add_argument("name", help="Template name")
     p_tpl_add.add_argument("--duration", "-d", type=int, default=120, help="Duration in minutes")
-    p_tpl_add.add_argument("--mode", "-m", choices=["blacklist", "whitelist"], default="blacklist", help="Blocking mode")
+    p_tpl_add.add_argument("--mode", "-m", choices=["blacklist", "whitelist", "ban"], default="blacklist", help="Blocking mode")
     p_tpl_add.add_argument("--type", dest="session_type", choices=["standard", "pomodoro", "rescue"], default="standard", help="Session type")
     p_tpl_add.add_argument("--focus", type=int, default=25, help="Pomodoro focus minutes")
     p_tpl_add.add_argument("--break", dest="break_time", type=int, default=5, help="Pomodoro break minutes")

@@ -96,6 +96,7 @@ const els = {
   sessionSettingsTitle: $("#sessionSettingsTitle"),
   standardSettingsArea: $("#standardSettingsArea"),
   pomodoroSettingsArea: $("#pomodoroSettingsArea"),
+  groupsCard: $("#groupsCard"),
   btnStart: $("#btnStart"),
   btnStop: $("#btnStop"),
   unlockInfo: $("#unlockInfo"),
@@ -647,7 +648,7 @@ function formatRecurringDayList(days = []) {
 }
 
 function modeLabel(mode) {
-  return mode === "whitelist" ? "Whitelist" : "Blacklist";
+  return mode === "whitelist" ? "Whitelist" : mode === "ban" ? "Ban" : "Blacklist";
 }
 
 function typeLabel(type) {
@@ -1146,7 +1147,7 @@ function renderTemplates() {
       meta.className = "template-meta";
 
       const chips = [
-        template.mode === "whitelist" ? "Whitelist" : "Blacklist",
+        template.mode === "whitelist" ? "Whitelist" : template.mode === "ban" ? "Ban" : "Blacklist",
         template.session_type === "rescue" ? "Rescue" : template.session_type === "pomodoro" ? "Pomodoro" : "Standard",
         templateDurationLabel(template),
         (template.groups || []).length ? `Groups: ${(template.groups || []).join(", ")}` : "No groups",
@@ -1203,7 +1204,7 @@ function renderTemplates() {
       
       const meta = document.createElement("div");
       meta.style.cssText = "font-size: 10px; color: #a1a1aa;";
-      meta.textContent = `${templateDurationLabel(template)} • ${template.mode === "whitelist" ? "WL" : "BL"}`;
+      meta.textContent = `${templateDurationLabel(template)} • ${template.mode === "whitelist" ? "WL" : template.mode === "ban" ? "BAN" : "BL"}`;
       
       leftCol.appendChild(title);
       leftCol.appendChild(meta);
@@ -1256,8 +1257,14 @@ function startTemplate(templateId, button) {
   // 1. Set Mode
   currentMode = template.mode || "blacklist";
   $$(".mode-btn:not(.session-type-btn):not(.schedule-type-btn)").forEach(b => b.classList.remove("active"));
-  const modeBtn = $(`#btn${currentMode === "whitelist" ? "Whitelist" : "Blacklist"}`);
+  const modeBtn = $(`#btn${currentMode === "whitelist" ? "Whitelist" : currentMode === "ban" ? "Ban" : "Blacklist"}`);
   if (modeBtn) modeBtn.classList.add("active");
+
+  if (currentMode === "ban") {
+    els.groupsCard.classList.add("hidden");
+  } else {
+    els.groupsCard.classList.remove("hidden");
+  }
 
   // 2. Set Session Type
   sessionType = template.session_type || "standard";
@@ -1750,7 +1757,7 @@ document.getElementById("btnContinueRecap")?.addEventListener("click", () => {
  * @returns {{ blockType: string, sessionType: string, durationText: string, expiryText: string, domainCount: string }}
  */
 function computeBlockDetails() {
-  const blockType = currentMode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+  const blockType = currentMode === "whitelist" ? "✅ Whitelist" : currentMode === "ban" ? "⛔ Ban" : "🚫 Blacklist";
   const sessionLabel = sessionType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
 
   let totalMinutes;
@@ -1868,6 +1875,13 @@ function initEvents() {
         );
         btn.classList.add("active");
         currentMode = btn.dataset.mode;
+        
+        if (currentMode === "ban") {
+          els.groupsCard.classList.add("hidden");
+        } else {
+          els.groupsCard.classList.remove("hidden");
+        }
+        
         updateSetupSummaries();
       });
     },

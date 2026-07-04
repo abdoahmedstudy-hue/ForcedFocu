@@ -285,8 +285,8 @@ function shouldBlockUrl(urlString) {
   if (currentBlockMode === "blacklist") {
     // Blacklist: block if domain is in the set
     return isHostnameBlocked(hostname);
-  } else if (currentBlockMode === "whitelist" || currentBlockMode === "rescue") {
-    // Whitelist/Rescue: block if domain is NOT in the allowed set
+  } else if (currentBlockMode === "whitelist" || currentBlockMode === "rescue" || currentBlockMode === "ban") {
+    // Whitelist/Rescue/Ban: block if domain is NOT in the allowed set
     // For rescue mode, blockedDomainsSet is empty (nothing allowed)
     if (hostname === "127.0.0.1" || hostname === "localhost") return false;
     return !isHostnameBlocked(hostname);
@@ -792,20 +792,19 @@ async function syncBlockRules(status = null) {
         lastRulesSignature = nextSignature;
         await saveState();
       }
-    } else if (status.active && status.mode === "whitelist") {
+    } else if (status.active && (status.mode === "whitelist" || status.mode === "ban")) {
       const isRescue = status.session_type === "rescue";
-      const modeKey = isRescue ? "rescue" : "whitelist";
+      const isBan = status.mode === "ban";
+      const modeKey = isRescue ? "rescue" : isBan ? "ban" : "whitelist";
       let allowed = [];
-      if (!isRescue) {
+      if (!isRescue && !isBan) {
         const sessionData = await fetchSessionDomains();
         allowed = normalizeDomains(sessionData.domains || []);
       }
       const nextSignature = buildRulesSignature(modeKey, allowed);
       if (!lastActive || lastMode !== modeKey || lastRulesSignature !== nextSignature) {
         await applyWhitelistRules(allowed);
-        if (isRescue) {
-          currentBlockMode = "rescue";
-        }
+        currentBlockMode = modeKey;
         await clearBrowserCache();
         lastActive = true;
         lastMode = modeKey;

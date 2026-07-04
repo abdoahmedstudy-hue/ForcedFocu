@@ -226,7 +226,7 @@ function renderGroups() {
   if (!grid || !section) return;
 
   const names = Object.keys(availableGroups);
-  if (names.length === 0) {
+  if (names.length === 0 || mode === "ban") {
     section.classList.add("hidden");
     return;
   }
@@ -443,7 +443,7 @@ async function refresh(stateData) {
  * @returns {{ blockType: string, sessionType: string, durationText: string, expiryText: string, domainCount: string }}
  */
 function computeBlockDetails() {
-  const blockType = mode === "whitelist" ? "✅ Whitelist" : "🚫 Blacklist";
+  const blockType = mode === "whitelist" ? "✅ Whitelist" : mode === "ban" ? "⛔ Ban" : "🚫 Blacklist";
   const sessionLabel = sessionType === "pomodoro" ? "🍅 Pomodoro" : "⏱ Standard";
 
   let totalMinutes;
@@ -533,6 +533,7 @@ function initEvents() {
       $$(".mode-chip").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       mode = btn.dataset.mode;
+      renderGroups();
     });
   });
 

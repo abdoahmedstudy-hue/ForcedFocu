@@ -139,6 +139,11 @@
                   <span class="mode-name">Whitelist</span>
                   <span class="mode-desc">Allow only listed sites</span>
                 </button>
+                <button class="mode-btn" id="btnBan" data-mode="ban">
+                  <span class="mode-icon">⛔</span>
+                  <span class="mode-name">Ban</span>
+                  <span class="mode-desc">Block everything</span>
+                </button>
               </div>
             </div>
 
@@ -259,7 +264,7 @@
         <div class="tab-pane" id="tab-rules">
           <section class="lists-section">
             <!-- Active Groups Selection -->
-            <div class="card list-card span-all">
+            <div class="card list-card span-all" id="groupsCard">
               <div class="list-header">
                 <h2 class="card-title">
                   <span class="list-icon">🛡️</span> Domain Groups
