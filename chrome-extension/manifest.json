@@ -4,14 +4,11 @@
   "description": "Quick access to ForcedFocus \u2014 unbreakable website blocker for macOS.",
   "version": "3.0.0",
   "permissions": [
-    "activeTab",
     "alarms",
-    "contextMenus",
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",
     "browsingData",
     "notifications",
-    "scripting",
     "storage",
     "webNavigation",
     "tabs"

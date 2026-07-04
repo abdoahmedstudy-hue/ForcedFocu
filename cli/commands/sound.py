@@ -16,7 +16,6 @@ def cmd_sound(args):
             out.print_error(
                 resp.get("message", "Failed to retrieve sounds."), code="SOUND_ERROR"
             )
-            return
 
         sounds = resp.get("sounds", [])
         if not sounds:
@@ -35,7 +34,6 @@ def cmd_sound(args):
         filename = args.filename
         if not filename:
             out.print_error("Filename is required for 'delete'.", code="USAGE_ERROR")
-            return
 
         resp = send_command({"action": "delete_sound", "filename": filename})
         out.print_data(resp, title="Delete Sound")

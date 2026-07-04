@@ -15,8 +15,8 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 DAEMON_DST="/usr/local/bin/forcefocus_daemon.py"
+SNI_PROXY_DST="/usr/local/bin/sni_proxy.py"
 CLI_DST="/usr/local/bin/forcefocus"
-WEB_DST="/usr/local/bin/forcefocus_web.py"
 PLIST_DST="/Library/LaunchDaemons/com.forcefocus.daemon.plist"
 CONFIG_DIR="/etc/forcefocus"
 WEB_DIR_DST="/usr/local/share/forcefocus"
@@ -26,8 +26,6 @@ HOSTS_PATH="/private/etc/hosts"
 
 MARKER_BEGIN="# ──── BEGIN FORCEFOCUS ────"
 MARKER_END="# ──── END FORCEFOCUS ────"
-PERMA_MARKER_BEGIN="# ──── BEGIN FORCEFOCUS PERMANENT ────"
-PERMA_MARKER_END="# ──── END FORCEFOCUS PERMANENT ────"
 
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -114,8 +112,8 @@ chflags nouchg "$HOSTS_PATH" 2>/dev/null || true
 
 # ── Strip ForcedFocus block from /etc/hosts ───────────────────────────────────
 echo -e "${CYAN}  Restoring /etc/hosts...${NC}"
-if grep -q "BEGIN FORCEFOCUS" "$HOSTS_PATH" 2>/dev/null; then
-    # Use python to remove the blocks (inclusive of markers)
+if grep -q "$MARKER_BEGIN" "$HOSTS_PATH" 2>/dev/null; then
+    # Use sed to remove the block (inclusive of markers)
     $PYTHON_BIN -c "
 from pathlib import Path
 hosts = Path('${HOSTS_PATH}')
@@ -124,10 +122,10 @@ lines = content.split('\n')
 result = []
 inside = False
 for line in lines:
-    if '${MARKER_BEGIN}' in line or '${PERMA_MARKER_BEGIN}' in line:
+    if '${MARKER_BEGIN}' in line:
         inside = True
         continue
-    if '${MARKER_END}' in line or '${PERMA_MARKER_END}' in line:
+    if '${MARKER_END}' in line:
         inside = False
         continue
     if not inside:
@@ -160,7 +158,7 @@ echo -e "${GREEN}  ✓ DNS servers restored.${NC}"
 # ── Remove system files ───────────────────────────────────────────────────────
 echo -e "${CYAN}  Removing installed files...${NC}"
 
-for f in "$DAEMON_DST" "$CLI_DST" "$WEB_DST" "$PLIST_DST" "$SOCK_PATH"; do
+for f in "$DAEMON_DST" "$SNI_PROXY_DST" "$CLI_DST" "$PLIST_DST" "$SOCK_PATH"; do
     if [[ -e "$f" ]]; then
         rm -f "$f"
         echo -e "    Removed: ${f}"
@@ -189,14 +187,12 @@ if [[ -d "$CONFIG_DIR" ]]; then
         echo -e "${YELLOW}  ⚠ ${BACKUP_COUNT} hosts backup(s) moved to: ${BACKUP_DST}${NC}"
     fi
 
-    # Remove only runtime files, preserve user configuration (JSON files)
-    rm -f "$CONFIG_DIR"/api_token "$CONFIG_DIR"/ks_hash "$CONFIG_DIR"/user "$CONFIG_DIR"/session.lock
-    echo -e "    Removed: Runtime files from ${CONFIG_DIR} (preserved user data)"
+    rm -rf "$CONFIG_DIR"
+    echo -e "    Removed: ${CONFIG_DIR}"
 fi
 
 # ── Remove log files ─────────────────────────────────────────────────────────
-for log in /var/log/forcefocus.log /var/log/forcefocus_error.log \
-           /var/log/forcefocus_web.log /var/log/forcefocus_web_error.log; do
+for log in /var/log/forcefocus.log /var/log/forcefocus_error.log; do
     if [[ -e "$log" ]]; then
         rm -f "$log"
         echo -e "    Removed: ${log}"
@@ -211,7 +207,7 @@ fi
 
 # ── Kill any remaining processes ─────────────────────────────────────────────
 echo -e "${CYAN}  Killing any remaining processes...${NC}"
-pkill -f "forcefocus" 2>/dev/null || true
+pkill -9 -f "forcefocus" 2>/dev/null || true
 echo -e "${GREEN}  ✓ Processes terminated.${NC}"
 
 # ── Done ──────────────────────────────────────────────────────────────────────

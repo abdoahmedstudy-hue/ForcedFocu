@@ -30,15 +30,15 @@ print_success() {
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DAEMON_SRC="${SCRIPT_DIR}/forcefocus_daemon.py"
-CLI_SRC="${SCRIPT_DIR}/forcefocus_cli.py"
-WEB_SRC="${SCRIPT_DIR}/forcefocus_web.py"
-PLIST_SRC="${SCRIPT_DIR}/com.forcefocus.daemon.plist"
+DAEMON_SRC="${SCRIPT_DIR}/daemon/forcefocus_daemon.py"
+CLI_SRC="${SCRIPT_DIR}/cli/forcefocus_cli.py"
+PLIST_SRC="${SCRIPT_DIR}/daemon/com.forcefocus.daemon.plist"
 WEB_DIR_SRC="${SCRIPT_DIR}/web"
 
 DAEMON_DST="/usr/local/bin/forcefocus_daemon.py"
+SNI_PROXY_SRC="${SCRIPT_DIR}/daemon/sni_proxy.py"
+SNI_PROXY_DST="/usr/local/bin/sni_proxy.py"
 CLI_DST="/usr/local/bin/forcefocus"
-WEB_DST="/usr/local/bin/forcefocus_web.py"
 PLIST_DST="/Library/LaunchDaemons/com.forcefocus.daemon.plist"
 CONFIG_DIR="/etc/forcefocus"
 WEB_DIR_DST="/usr/local/share/forcefocus/web"
@@ -62,7 +62,7 @@ fi
 
 # Verify source files
 CLI_DIR_SRC="${SCRIPT_DIR}/cli"
-for f in "$DAEMON_SRC" "$CLI_SRC" "$WEB_SRC" "$PLIST_SRC"; do
+for f in "$DAEMON_SRC" "$CLI_SRC" "$PLIST_SRC"; do
     if [[ ! -f "$f" ]]; then
         echo -e "${RED}${BOLD} ✗ Missing Source${NC}: ${f}"
         exit 1
@@ -98,6 +98,7 @@ if launchctl list 2>/dev/null | grep -q "$PLIST_LABEL"; then
     launchctl unload "$PLIST_DST" 2>/dev/null || true
     sleep 1
 fi
+pkill -9 -f "forcefocus_daemon.py" || true
 print_success "Daemon state cleared"
 
 print_step "Initializing secure directory structure"
@@ -112,9 +113,16 @@ print_success "Created ${CONFIG_DIR}"
 # ── 2. Component Installation ─────────────────────────────────────────────────
 print_step "Deploying core components"
 
+# Ensure target directory exists
+mkdir -p "$(dirname "$DAEMON_DST")"
+
 cp "$DAEMON_SRC" "$DAEMON_DST"
 chmod 700 "$DAEMON_DST"
 chown root:wheel "$DAEMON_DST"
+
+cp "$SNI_PROXY_SRC" "$SNI_PROXY_DST"
+chmod 700 "$SNI_PROXY_DST"
+chown root:wheel "$SNI_PROXY_DST"
 
 CLI_LIB_DST="/usr/local/lib/forcefocus"
 rm -rf "$CLI_LIB_DST"
@@ -131,16 +139,11 @@ EOF
 chmod 755 "$CLI_DST"
 chown root:wheel "$CLI_DST"
 
-cp "$WEB_SRC" "$WEB_DST"
-chmod 755 "$WEB_DST"
-chown root:wheel "$WEB_DST"
-
+# Clear existing directory to prevent duplicate nesting or stale files
+rm -rf "$WEB_DIR_DST"
 mkdir -p "$WEB_DIR_DST"
 cp -R "$WEB_DIR_SRC/"* "$WEB_DIR_DST/"
-# Ensure shared directory is included if it hasn't been synced locally yet
-if [[ -d "${SCRIPT_DIR}/shared" ]]; then
-    cp -R "${SCRIPT_DIR}/shared" "$WEB_DIR_DST/"
-fi
+
 chmod -R 755 "$WEB_DIR_DST"
 
 cp "$PLIST_SRC" "$PLIST_DST"
@@ -150,14 +153,14 @@ chown root:wheel "$PLIST_DST"
 print_success "Binary and service definitions installed"
 
 print_step "Compiling and deploying Menu Bar Application"
-if [[ -f "${SCRIPT_DIR}/build_menubar.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/menubar/build_menubar.sh" ]]; then
     # Build the menubar app
-    (cd "${SCRIPT_DIR}" && bash build_menubar.sh) > /dev/null
+    (cd "${SCRIPT_DIR}/menubar" && bash build_menubar.sh) > /dev/null
     
     # Deploy to Applications
     APP_DST="/Applications/ForcedFocusBar.app"
     rm -rf "$APP_DST"
-    cp -R "${SCRIPT_DIR}/ForcedFocusBar.app" "$APP_DST"
+    cp -R "${SCRIPT_DIR}/menubar/ForcedFocusBar.app" "$APP_DST"
     
     # Set correct permissions
     chown -R "$REAL_USER":staff "$APP_DST"
@@ -211,7 +214,7 @@ fi
 print_success "Kernel anchor synchronized"
 
 print_step "Installing log rotation configuration"
-NEWSYSLOG_SRC="${SCRIPT_DIR}/forcefocus.newsyslog.conf"
+NEWSYSLOG_SRC="${SCRIPT_DIR}/daemon/forcefocus.newsyslog.conf"
 NEWSYSLOG_DST="/etc/newsyslog.d/forcefocus.conf"
 if [[ -f "$NEWSYSLOG_SRC" ]]; then
     cp "$NEWSYSLOG_SRC" "$NEWSYSLOG_DST"

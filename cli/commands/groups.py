@@ -35,12 +35,10 @@ def cmd_groups(args):
     elif action == "add":
         if not name:
             out.print_error("Group name required for 'add'.", code="USAGE_ERROR")
-            return
         if not args.domains:
             out.print_error(
                 "At least one domain required for 'add'.", code="USAGE_ERROR"
             )
-            return
 
         resp = send_command(
             {"action": "add_group", "name": name, "domains": args.domains}
@@ -50,7 +48,6 @@ def cmd_groups(args):
     elif action == "remove":
         if not name:
             out.print_error("Group name required for 'remove'.", code="USAGE_ERROR")
-            return
 
         resp = send_command({"action": "remove_group", "name": name})
         out.print_data(resp, title="Remove Group")

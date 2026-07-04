@@ -69,7 +69,7 @@ async function loadApiToken() {
       signal: AbortSignal.timeout(2000),
     });
     const html = await res.text();
-    const match = html.match(/window\.apiToken\s*=\s*"([^"]+)"/);
+    const match = html.match(/window\.apiToken\s*=\s*["']([^"']+)["']/);
     if (match && match[1]) {
       apiToken = match[1];
     }
@@ -927,9 +927,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     const blockedUrl =
       chrome.runtime.getURL("blocked.html") +
       "?domain=" +
-      encodeURIComponent(hostname || "this site") +
-      "&url=" +
-      encodeURIComponent(details.url);
+      encodeURIComponent(hostname || "this site");
 
     // Record for analytics
     if (hostname) recordBlockedRequest(hostname);
@@ -1094,32 +1092,6 @@ chrome.runtime.onInstalled.addListener((details) => {
       analytics = result.analytics;
     }
   });
-  
-  // Create context menus
-  chrome.contextMenus.create({
-    id: "forcedfocus-parent",
-    title: "Forced Focus",
-    contexts: ["page", "link"]
-  });
-  chrome.contextMenus.create({
-    id: "add-blacklist",
-    parentId: "forcedfocus-parent",
-    title: "Add to Blacklist",
-    contexts: ["page", "link"]
-  });
-  chrome.contextMenus.create({
-    id: "add-whitelist",
-    parentId: "forcedfocus-parent",
-    title: "Add to Whitelist",
-    contexts: ["page", "link"]
-  });
-  chrome.contextMenus.create({
-    id: "add-perma-block",
-    parentId: "forcedfocus-parent",
-    title: "Add to Permanent Block",
-    contexts: ["page", "link"]
-  });
-
   ensureSyncAlarm();
   connectSSE();
   stateLoadedPromise.then(() => syncBlockRules());
@@ -1129,105 +1101,6 @@ chrome.runtime.onInstalled.addListener((details) => {
 ensureSyncAlarm();
 connectSSE();
 stateLoadedPromise.then(() => syncBlockRules());
-
-// ── Context Menu Actions ──────────────────────────────────────────────────────
-
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const url = info.linkUrl || info.pageUrl;
-  const domain = extractHostname(url);
-  if (!domain) {
-    showContextMenuNotification(tab.id, "error", "Could not extract a valid domain.", true);
-    return;
-  }
-
-  let endpoint = "";
-  let listName = "";
-
-  if (info.menuItemId === "add-blacklist") {
-    endpoint = `${API}/api/lists/blacklist`;
-    listName = "Blacklist";
-  } else if (info.menuItemId === "add-whitelist") {
-    endpoint = `${API}/api/lists/whitelist`;
-    listName = "Whitelist";
-  } else if (info.menuItemId === "add-perma-block") {
-    endpoint = `${API}/api/perma-blocklist`;
-    listName = "Permanent Blocklist";
-  } else {
-    return;
-  }
-
-  try {
-    if (!apiToken) await loadApiToken();
-    const headers = { "Content-Type": "application/json" };
-    if (apiToken) headers["X-API-Token"] = apiToken;
-
-    let response = await fetchWithRetry(endpoint, {
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify({ domain }),
-    });
-
-    if (response.status === 401) {
-      await loadApiToken();
-      if (apiToken) headers["X-API-Token"] = apiToken;
-      response = await fetchWithRetry(endpoint, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify({ domain }),
-      });
-    }
-
-    const data = await response.json();
-    if (response.ok && data.status === "ok") {
-      showContextMenuNotification(tab.id, domain, `✓ Added ${domain} to ${listName}`, false);
-    } else {
-      showContextMenuNotification(tab.id, domain, data.message || "Failed to add domain.", true);
-    }
-  } catch (err) {
-    console.error("Context menu action failed:", err);
-    showContextMenuNotification(tab.id, domain, "Connection to ForcedFocus daemon failed.", true);
-  }
-});
-
-function showContextMenuNotification(tabId, id, message, isError = false) {
-  if (!tabId) return;
-  chrome.scripting.executeScript({
-    target: { tabId: tabId },
-    func: (msg, err) => {
-      const toast = document.createElement("div");
-      toast.innerText = msg;
-      toast.style.position = "fixed";
-      toast.style.bottom = "24px";
-      toast.style.right = "24px";
-      toast.style.padding = "12px 24px";
-      toast.style.backgroundColor = err ? "#ef4444" : "#10b981";
-      toast.style.color = "white";
-      toast.style.borderRadius = "8px";
-      toast.style.boxShadow = "0 10px 30px rgba(0,0,0,0.2)";
-      toast.style.fontFamily = "system-ui, -apple-system, sans-serif";
-      toast.style.fontSize = "14px";
-      toast.style.fontWeight = "500";
-      toast.style.zIndex = "2147483647";
-      toast.style.opacity = "0";
-      toast.style.transform = "translateY(10px)";
-      toast.style.transition = "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)";
-      toast.style.pointerEvents = "none";
-      document.body.appendChild(toast);
-
-      requestAnimationFrame(() => {
-        toast.style.opacity = "1";
-        toast.style.transform = "translateY(0)";
-      });
-
-      setTimeout(() => {
-        toast.style.opacity = "0";
-        toast.style.transform = "translateY(10px)";
-        setTimeout(() => toast.remove(), 300);
-      }, 3000);
-    },
-    args: [message, isError]
-  }).catch(e => console.error("Toast injection failed:", e));
-}
 
 // ── Connection Management ──────────────────────────────────────────────────────
 

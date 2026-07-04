@@ -1,0 +1,17 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i css/settings-input.css -o css/setting.css && npx @tailwindcss/cli -i css/styles-input.css -o css/styles.css && npx @tailwindcss/cli -i css/tailwind-menubar.css -o css/menubar.css"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.2",
+    "tailwindcss": "^4.3.2"
+  }
+}

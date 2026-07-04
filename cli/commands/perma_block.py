@@ -62,7 +62,6 @@ def cmd_perma_block(args):
             out.print_error(
                 "At least one domain is required.", code="USAGE_ERROR"
             )
-            return
 
         resp = send_command({"action": "add_perma_block", "domains": domains})
         out.print_data(resp, title="🔒 Permanent Block")
@@ -71,7 +70,6 @@ def cmd_perma_block(args):
         domain = args.domain
         if not domain:
             out.print_error("Domain is required for 'unblock'.", code="USAGE_ERROR")
-            return
 
         key = args.key
         if not key:
@@ -80,7 +78,6 @@ def cmd_perma_block(args):
                     "Kill-switch passphrase required for agent mode.",
                     code="MISSING_KEY",
                 )
-                return
             key = getpass.getpass("🔓 Kill-switch passphrase: ")
 
         if out.is_human:
@@ -99,7 +96,6 @@ def cmd_perma_block(args):
         domain = args.domain
         if not domain:
             out.print_error("Domain is required for 'cancel'.", code="USAGE_ERROR")
-            return
 
         resp = send_command({"action": "cancel_perma_unblock", "domain": domain})
         out.print_data(resp, title="🔒 Cancel Unblock")

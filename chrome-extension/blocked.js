@@ -8,7 +8,6 @@ import { formatTime } from "./shared/utils.js";
 // ── Domain Display ───────────────────────────────────────────────────────────
 const params = new URLSearchParams(window.location.search);
 const domain = params.get("domain") || "this site";
-const originalUrl = params.get("url") || `https://${domain}`;
 document.getElementById("blockedDomain").textContent = domain;
 document.title = `Blocked: ${domain} — ForcedFocus`;
 
@@ -242,16 +241,10 @@ function showEnded() {
     tickRAF = null;
   }
   if (badge) {
-    badge.textContent = "✅ Session ended — redirecting...";
+    badge.textContent = "✅ Session ended — you can close this tab";
     badge.style.color = "#22c55e";
     badge.style.background = "rgba(34, 197, 94, 0.15)";
     badge.style.boxShadow = "0 0 10px rgba(34, 197, 94, 0.1)";
-  }
-  
-  if (domain !== "all" && domain !== "this site") {
-    setTimeout(() => {
-      window.location.href = originalUrl;
-    }, 1500);
   }
 }
 

@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --color-glass: rgba(255, 255, 255, 0.05);
+  --color-glass-hover: rgba(255, 255, 255, 0.1);
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+}
+
+/* Background Orbs Animation */
+@keyframes orbFloat {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(-10%, 5%) scale(1.1); }
+}
+.bg-orb-1 {
+  animation: orbFloat 25s infinite alternate ease-in-out;
+}
+.bg-orb-2 {
+  animation: orbFloat 20s infinite alternate-reverse ease-in-out;
+}
+
+/* Tab transitions */
+.tab-content {
+  display: none;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+.tab-content.active {
+  display: block;
+  opacity: 1;
+  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}

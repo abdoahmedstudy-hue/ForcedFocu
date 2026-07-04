@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="icons/icon48.png" />
+  <link rel="icon" type="image/png" href="assets/icons/icon48.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ForcedFocus — Stay Focused</title>
   <meta name="description" content="ForcedFocus: Unbreakable website blocker for macOS productivity." />
@@ -11,10 +11,25 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="css/styles.css" />
 </head>
 
 <body>
+  <!-- Premium System Sentinel Loader -->
+  <div id="appLoader" class="app-loader" aria-hidden="false">
+    <div class="loader-content">
+      <div class="loader-scanner">
+        <div class="scanner-circle"></div>
+        <div class="scanner-line"></div>
+        <div class="scanner-crosshair"></div>
+      </div>
+      <div class="loader-telemetry">
+        <span class="telemetry-tag">Sentinel SECURE</span>
+        <span class="telemetry-status">Initializing ForcedFocus System...</span>
+      </div>
+    </div>
+  </div>
+
   <div class="app">
     <div class="dashboard-layout">
       <div class="dashboard-sidebar">
@@ -22,7 +37,7 @@
         <header class="header">
           <div class="logo">
             <div class="logo-icon brand-mark">
-              <img src="icons/block-user.png" alt="Logo">
+              <img src="assets/icons/block-user.png" alt="Logo">
             </div>
             <div>
               <h1>ForcedFocus</h1>
@@ -124,13 +139,7 @@
                   <span class="mode-name">Whitelist</span>
                   <span class="mode-desc">Allow only listed sites</span>
                 </button>
-                <button class="mode-btn" id="btnRescueMode" data-mode="rescue">
-                  <span class="mode-icon">🛡️</span>
-                  <span class="mode-name">Rescue</span>
-                  <span class="mode-desc">Block everything</span>
-                </button>
               </div>
-
             </div>
 
             <!-- Unified Session Settings -->
@@ -177,9 +186,6 @@
                   <button class="dur-btn pomo-preset" data-focus="50" data-break="10">
                     50/10
                   </button>
-                  <button class="dur-btn pomo-preset" data-focus="75" data-break="15">
-                    75/15
-                  </button>
                   <button class="dur-btn pomo-preset" data-focus="90" data-break="20">
                     90/20
                   </button>
@@ -219,29 +225,34 @@
                 <div class="empty-list">No templates saved yet.</div>
               </div>
             </div>
-            <!-- Quick Action: Rescue Throne -->
+
+            <!-- Rescue Throne -->
             <div class="card rescue-card" id="rescueCard">
               <div class="rescue-header">
                 <h2 class="card-title flush">
                   🛡️ Rescue Throne
                 </h2>
-                <label for="rescueQuickDuration" class="sr-only">Rescue duration</label>
-                <select id="rescueQuickDuration" class="rescue-select">
-                  <option value="5">5 min</option>
-                  <option value="10" selected>10 min</option>
-                  <option value="30">30 min</option>
-                  <option value="60">1 hr</option>
+                <label for="rescueDuration" class="sr-only">Rescue duration in minutes</label>
+                <select id="rescueDuration" class="rescue-select">
+                  <option value="5">
+                    5 min
+                  </option>
+                  <option value="10" selected>
+                    10 min
+                  </option>
+                  <option value="30">
+                    30 min
+                  </option>
                 </select>
               </div>
               <p class="rescue-desc">
-                Emergency quick-start. Blocks <strong>all</strong> websites immediately.
+                Emergency lockdown. Blocks <strong>all</strong> websites
+                without exception.
               </p>
-              <button class="btn btn-rescue" id="btnQuickRescue">
+              <button class="btn btn-rescue" id="btnRescue">
                 Activate Rescue
               </button>
             </div>
-
-
           </section>
         </div>
         <!-- TAB: Rules -->
@@ -265,8 +276,6 @@
                 </div>
               </div>
             </div>
-
-
 
             <!-- Permanent Block -->
             <div class="card list-card perma-block-card span-all">
@@ -381,52 +390,6 @@
               </ul>
             </div>
 
-            <!-- Prayer Rescue Mode -->
-            <div class="card list-card prayer-card span-all" id="prayerCard" style="display: none;">
-                <div class="list-header prayer-header">
-                    <div class="prayer-top-surface">
-                        <div class="prayer-next-info">
-                            <span class="prayer-icon">🕌</span>
-                            <div>
-                                <h2 class="card-title prayer-name" id="prayerNextName">—</h2>
-                                <div class="prayer-countdown" id="prayerCountdown">--:--:--</div>
-                            </div>
-                        </div>
-                        <div class="prayer-actions" style="display: flex; gap: 8px;">
-                            <button class="btn-skip-prayer" id="btnSkipPrayer" title="Skip next prayer block">
-                                Skip
-                            </button>
-                            <button class="btn-skip-prayer hidden" id="btnUnskipPrayer" title="Undo skip" style="background: hsl(0, 0%, 20%); border-color: hsl(0, 0%, 40%); color: hsl(0, 0%, 80%);">
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Lock warning (replaces skip button when <= 30 min) -->
-                <div class="prayer-lock-warning hidden" id="prayerLockWarning">
-                    ⚠️ Prayer Rescue Mode is locked and imminent. Skip is disabled.
-                </div>
-                
-                <!-- Active prayer banner -->
-                <div class="prayer-active-banner hidden" id="prayerActiveBanner">
-                    <span class="prayer-active-icon">🕋</span>
-                    <span>Prayer Rescue Mode is active — all sites blocked.</span>
-                    <span class="prayer-active-timer" id="prayerActiveTimer">30:00</span>
-                </div>
-                
-                <!-- Today's prayer times grid -->
-                <div class="prayer-times-grid" id="prayerTimesGrid">
-                    <!-- Populated dynamically -->
-                </div>
-                
-                <!-- Cold start / no location message -->
-                <div class="prayer-offline-msg hidden" id="prayerOfflineMsg">
-                    <span id="prayerOfflineText">Set your location to activate prayer times.</span>
-                    <button class="btn btn-location" id="btnDetectLocationDash" style="margin-top: 8px;">📍 Detect My Location</button>
-                </div>
-            </div>
-
             <!-- Recurring Schedules -->
             <div class="card recurring-list" id="recurringSchedulesCard">
               <div class="list-header">
@@ -475,7 +438,7 @@
             <!-- Header + Range Selector -->
             <div class="card tracking-header-card">
               <div class="tracking-header">
-                <h2 class="card-title flush"><img src="icons/icon48.png" style="width: 20px; height: 20px; object-fit: contain; margin-right: 2px;"> Focus Analytics</h2>
+                <h2 class="card-title flush"><img src="assets/icons/icon48.png" style="width: 20px; height: 20px; object-fit: contain; margin-right: 2px;"> Focus Analytics</h2>
                 <div class="segmented-control tracking-range-selector">
                   <button class="tracking-range-btn active" data-range="today">Today</button>
                   <button class="tracking-range-btn" data-range="yesterday">Yesterday</button>
@@ -757,14 +720,14 @@
             </label>
             <label id="recurringEditModeField">
               <span>Mode</span>
-              <select id="recurringEditMode" class="recurring-select">
+              <select id="recurringEditMode">
                 <option value="blacklist">Blacklist</option>
                 <option value="whitelist">Whitelist</option>
               </select>
             </label>
             <label id="recurringEditTypeField">
               <span>Type</span>
-              <select id="recurringEditType" class="recurring-select">
+              <select id="recurringEditType">
                 <option value="standard">Standard</option>
                 <option value="pomodoro">Pomodoro</option>
                 <option value="rescue">Rescue</option>
@@ -786,8 +749,8 @@
           <label class="sr-only">Groups</label>
           <div class="session-groups" id="recurringEditGroups"></div>
           <label class="recurring-enabled-row">
-            <input type="checkbox" id="recurringEditEnabled" class="custom-checkbox" />
-            <span>Active Schedule</span>
+            <input type="checkbox" id="recurringEditEnabled" />
+            <span>Active</span>
           </label>
         </form>
         <div class="modal-actions">
@@ -887,7 +850,7 @@
     <div class="toast hidden" id="toast"></div>
   </div>
 
-  <script type="module" src="app.js?v=templates"></script>
+  <script type="module" src="js/app.js?v=templates"></script>
 </body>
 
 </html>
