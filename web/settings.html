@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — ForcedFocus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- Compiled Tailwind CSS -->
+  <link rel="stylesheet" href="css/setting.css" />
+</head>
+
+<body class="bg-[#09090b] text-gray-100 min-h-screen relative overflow-x-hidden font-sans selection:bg-indigo-500/30">
+  
+  <!-- Premium Background Orbs -->
+  <div class="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/15 blur-[120px] pointer-events-none z-0 mix-blend-screen animate-[orbFloat_20s_ease-in-out_infinite_alternate]"></div>
+  <div class="fixed bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-purple-600/15 blur-[120px] pointer-events-none z-0 mix-blend-screen animate-[orbFloat_25s_ease-in-out_infinite_alternate-reverse]"></div>
+
+  <!-- Subtle Noise -->
+  <div class="fixed inset-0 pointer-events-none z-0 opacity-[0.03] mix-blend-overlay" style="background-image: url(&quot;data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E&quot;);"></div>
+
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-10">
+    
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between mb-12 gap-6">
+      <div class="flex items-center gap-6">
+        <a href="index.html" class="flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 hover:scale-105 transition-all duration-300 text-gray-400 hover:text-white backdrop-blur-md shadow-lg group" title="Back to Dashboard">
+          <svg class="w-5 h-5 transform group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        </a>
+        <div>
+          <h1 class="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 tracking-tight">Settings</h1>
+          <p class="text-xs font-bold text-indigo-400 uppercase tracking-[0.2em] mt-1.5">Application Configuration</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Layout -->
+    <main class="flex flex-col lg:flex-row gap-8 lg:gap-12">
+      
+      <!-- Sidebar -->
+      <aside class="w-full lg:w-72 shrink-0">
+        <nav class="flex flex-col gap-2 sticky top-12">
+          <button class="nav-tab active w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-semibold transition-all duration-300 bg-indigo-500/15 border border-indigo-500/30 text-white shadow-[0_0_20px_rgba(99,102,241,0.1)]" data-target="tab-sounds">
+            <span class="text-xl">🎵</span> 
+            <span>Sounds & Audio</span>
+          </button>
+          <button class="nav-tab w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-semibold transition-all duration-300 text-gray-400 hover:bg-white/5 hover:text-white border border-transparent" data-target="tab-domains">
+            <span class="text-xl">🛡️</span> 
+            <span>Domain Groups</span>
+          </button>
+          <button class="nav-tab w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-semibold transition-all duration-300 text-gray-400 hover:bg-white/5 hover:text-white border border-transparent" data-target="tab-prayer">
+            <span class="text-xl">🕌</span> 
+            <span>Prayer Times</span>
+          </button>
+          <button class="nav-tab w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-semibold transition-all duration-300 text-gray-400 hover:bg-white/5 hover:text-white border border-transparent" data-target="tab-notifications">
+            <span class="text-xl">🔔</span> 
+            <span>Notifications & Goals</span>
+          </button>
+        </nav>
+      </aside>
+
+      <!-- Content Area -->
+      <div class="flex-1 bg-[#12121a]/80 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-6 sm:p-10 shadow-2xl relative min-h-[600px]">
+        
+        <!-- Tab 1: Sounds -->
+        <div id="tab-sounds" class="tab-content active">
+          <div class="mb-8 border-b border-white/5 pb-6">
+            <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-3">
+              🎵 Sound Mapping
+            </h2>
+            <p class="text-sm text-gray-400">Select which audio files play for specific events.</p>
+          </div>
+          
+          <div class="flex flex-col gap-3 mb-10" id="settingsGrid">
+            <div class="text-sm text-gray-500 animate-pulse p-4 text-center">Fetching audio files...</div>
+          </div>
+          
+          <div class="mb-8 border-b border-white/5 pb-6">
+            <h3 class="text-xl font-bold text-white mb-2">📤 Upload New Sound</h3>
+            <p class="text-sm text-gray-400">Add custom audio to your library.</p>
+          </div>
+          
+          <!-- Drag & Drop Zone -->
+          <div id="dropZone" class="border-2 border-dashed border-white/20 rounded-3xl p-12 text-center transition-all duration-300 hover:bg-white/5 hover:border-indigo-400/50 cursor-pointer flex flex-col items-center justify-center group relative bg-black/20">
+            <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-all duration-300 group-hover:bg-indigo-500/20">
+              <span class="text-3xl text-indigo-400 group-hover:-translate-y-1 transition-transform">⬆️</span>
+            </div>
+            <p class="text-base font-semibold text-gray-200 mb-1">Drag and drop your audio file here</p>
+            <p class="text-xs text-gray-500 mb-6">Supports .mp3 format only, max 5MB</p>
+            
+            <label for="fileInput" class="px-6 py-2.5 rounded-full bg-white/10 text-white text-sm font-semibold border border-white/10 hover:bg-white/20 transition-all cursor-pointer active:scale-95 shadow-lg">
+              <span>Browse Files</span>
+              <input type="file" id="fileInput" accept="audio/mpeg" class="hidden" />
+            </label>
+            <div id="uploadStatus" class="absolute bottom-4 text-xs font-bold text-indigo-400 tracking-wide uppercase"></div>
+          </div>
+          
+          <div class="mt-8">
+            <button id="btnToggleLibrary" class="flex items-center justify-between w-full p-5 rounded-2xl bg-black/20 border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all text-sm font-semibold group">
+              <span class="flex items-center gap-3 text-gray-200"><span class="text-lg">📂</span> Your Sound Library</span>
+              <span class="text-xs text-gray-500 group-hover:text-white transition-colors">View All ▼</span>
+            </button>
+            <div id="libraryContent" class="hidden mt-4">
+              <div id="soundLibrary" class="bg-black/30 rounded-2xl p-3 max-h-[300px] overflow-y-auto border border-white/5 space-y-1">
+                <div class="p-4 text-sm text-gray-500 animate-pulse text-center">Loading library...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Domain Groups -->
+        <div id="tab-domains" class="tab-content">
+          <div class="flex justify-between items-center mb-8 border-b border-white/5 pb-6">
+            <div>
+              <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-3">🛡️ Domain Groups</h2>
+              <p class="text-sm text-gray-400">Create sets of websites to block together.</p>
+            </div>
+            <button id="btnNewGroup" class="flex items-center justify-center w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xl shadow-lg hover:shadow-indigo-500/25 hover:scale-105 active:scale-95 transition-all" aria-label="Add new domain group">+</button>
+          </div>
+          
+          <div id="groupList" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div class="text-sm text-gray-500 animate-pulse col-span-full text-center p-10">Loading groups...</div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Prayer Times -->
+        <div id="tab-prayer" class="tab-content">
+          <div class="mb-8 border-b border-white/5 pb-6">
+            <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-3">🕌 Prayer Times Block</h2>
+            <p class="text-sm text-gray-400">Configure absolute network blocks during prayer times.</p>
+          </div>
+
+          <div class="bg-black/20 rounded-3xl p-6 border border-white/5 mb-8 transition-colors hover:border-white/10">
+            <div class="flex items-center justify-between mb-6">
+              <div>
+                <label for="prayerBlockEnabled" class="font-bold text-gray-200 block mb-1">Enable Prayer Time Enforcement</label>
+                <p class="text-xs text-gray-500">Automatically blocks all network access during prayer times.</p>
+              </div>
+              <label for="prayerBlockEnabled" class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="prayerBlockEnabled" class="sr-only peer" />
+                <div class="w-12 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500 shadow-inner"></div>
+              </label>
+            </div>
+          </div>
+
+          <div class="mb-8">
+            <div class="flex items-center justify-between mb-4 px-2">
+              <h3 class="text-sm font-bold text-indigo-400 uppercase tracking-widest">Coordinates</h3>
+              <button id="btnGetLocation" class="group flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-indigo-500/20 border border-white/10 hover:border-indigo-500/50 transition-all active:scale-95 text-xs font-semibold text-gray-400 hover:text-indigo-300 backdrop-blur-md shadow-sm">
+                <svg class="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                Auto-Detect
+              </button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="bg-black/20 rounded-3xl p-5 border border-white/5 transition-colors hover:border-white/10 relative overflow-hidden group">
+                <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+                <label for="prayerLatitude" class="font-bold text-gray-400 block mb-3 text-[10px] uppercase tracking-[0.15em]">Latitude</label>
+                <input type="number" step="any" id="prayerLatitude" class="w-full bg-black/40 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 p-3 outline-none transition-all placeholder-gray-600 font-mono shadow-inner" placeholder="0.0000" />
+              </div>
+              
+              <div class="bg-black/20 rounded-3xl p-5 border border-white/5 transition-colors hover:border-white/10 relative overflow-hidden group">
+                <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+                <label for="prayerLongitude" class="font-bold text-gray-400 block mb-3 text-[10px] uppercase tracking-[0.15em]">Longitude</label>
+                <input type="number" step="any" id="prayerLongitude" class="w-full bg-black/40 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 p-3 outline-none transition-all placeholder-gray-600 font-mono shadow-inner" placeholder="0.0000" />
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-black/20 rounded-3xl p-6 border border-white/5 transition-colors hover:border-white/10">
+            <label for="prayerMethod" class="font-bold text-gray-200 block mb-2 text-sm">Calculation Method</label>
+            <select id="prayerMethod" class="w-full bg-black/50 border border-white/10 text-gray-200 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block p-3 outline-none appearance-none pr-8 relative cursor-pointer hover:border-white/20 transition-colors">
+              <option value="5">Egyptian General Authority of Survey (5)</option>
+              <option value="3">Muslim World League (3)</option>
+              <option value="2">Islamic Society of North America (2)</option>
+              <option value="4">Umm Al-Qura University, Makkah (4)</option>
+              <option value="1">University of Islamic Sciences, Karachi (1)</option>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+            <div class="bg-black/20 rounded-3xl p-6 border border-white/5 transition-colors hover:border-white/10">
+              <label for="prayerMinutesBefore" class="font-bold text-gray-200 block mb-2 text-sm">Minutes Before Prayer</label>
+              <input type="number" id="prayerMinutesBefore" min="0" max="120" class="w-full bg-black/50 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-3 outline-none transition-all placeholder-gray-600 font-medium" />
+            </div>
+            
+            <div class="bg-black/20 rounded-3xl p-6 border border-white/5 transition-colors hover:border-white/10">
+              <label for="prayerMinutesAfter" class="font-bold text-gray-200 block mb-2 text-sm">Minutes After Prayer</label>
+              <input type="number" id="prayerMinutesAfter" min="0" max="120" class="w-full bg-black/50 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-3 outline-none transition-all placeholder-gray-600 font-medium" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Notifications & Goals -->
+        <div id="tab-notifications" class="tab-content">
+          <div class="mb-8 border-b border-white/5 pb-6">
+            <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-3">🔔 Notifications</h2>
+            <p class="text-sm text-gray-400">Configure system alerts for your focus sessions.</p>
+          </div>
+          
+          <div class="bg-black/20 rounded-3xl p-6 border border-white/5 mb-10 transition-colors hover:border-white/10">
+            <div class="flex items-center justify-between mb-6">
+              <div>
+                <label for="intentNotifEnabled" class="font-bold text-gray-200 block mb-1">Continuous Target Reminders</label>
+                <p class="text-xs text-gray-500">Send a system notification to remind you of your target.</p>
+              </div>
+              <label for="intentNotifEnabled" class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="intentNotifEnabled" class="sr-only peer" />
+                <div class="w-12 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500 shadow-inner"></div>
+              </label>
+            </div>
+            
+            <div class="flex items-center justify-between pt-6 border-t border-white/5">
+              <label for="intentNotifInterval" class="font-bold text-gray-300 text-sm">Reminder Interval</label>
+              <select id="intentNotifInterval" class="bg-black/50 border border-white/10 text-gray-200 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block p-2.5 outline-none appearance-none pr-8 relative cursor-pointer hover:border-white/20 transition-colors">
+                <option value="5">Every 5 min</option>
+                <option value="10">Every 10 min</option>
+                <option value="15">Every 15 min</option>
+                <option value="30">Every 30 min</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="mb-8 border-b border-white/5 pb-6">
+            <h2 class="text-2xl font-bold text-white mb-2 flex items-center gap-3">🎯 Daily Goals</h2>
+            <p class="text-sm text-gray-400">Set a daily focus target to track your completion rate.</p>
+          </div>
+          
+          <div class="bg-black/20 rounded-3xl p-6 border border-white/5 transition-colors hover:border-white/10">
+            <div class="flex items-center justify-between">
+              <div>
+                <label for="dailyFocusGoalHours" class="font-bold text-gray-200 block mb-1">Target Focus Hours</label>
+                <p class="text-xs text-gray-500">Leave empty to hide the percentage.</p>
+              </div>
+              <input type="number" id="dailyFocusGoalHours" min="1" max="24" placeholder="e.g. 4" class="w-24 bg-black/50 border border-white/10 text-gray-200 text-base font-bold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-2.5 text-center outline-none hover:border-white/20 transition-colors" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="mt-12 pt-8 border-t border-white/10 flex items-center justify-end gap-4">
+          <a href="index.html" class="px-6 py-3 rounded-full bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 text-gray-300 text-sm font-semibold transition-all duration-300 text-center">
+            Cancel
+          </a>
+          <button id="btnSaveSettings" class="px-8 py-3 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-[0_4px_20px_rgba(79,70,229,0.3)] transition-all duration-300 hover:scale-105 active:scale-95">
+            Save Preferences
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Group Edit Modal -->
+    <div id="groupModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-black/80 backdrop-blur-md transition-opacity" id="groupModalBackdrop"></div>
+      <div class="relative bg-[#12121a] border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] w-full max-w-md p-8 transform transition-all">
+        <h2 id="groupModalTitle" class="text-2xl font-bold text-white mb-6">🛡️ New Group</h2>
+        
+        <div class="space-y-5">
+          <div>
+            <label for="groupNameInput" class="block text-sm font-bold text-gray-300 mb-2">Group Name</label>
+            <input type="text" id="groupNameInput" placeholder="e.g. Social Media" class="w-full bg-black/50 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-3.5 outline-none transition-all placeholder-gray-600 font-medium" />
+          </div>
+          <div>
+            <label for="groupDomainsInput" class="block text-sm font-bold text-gray-300 mb-2">Domains (one per line)</label>
+            <textarea id="groupDomainsInput" rows="5" placeholder="reddit.com&#10;twitter.com" class="w-full bg-black/50 border border-white/10 text-white text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 p-3.5 outline-none transition-all resize-none placeholder-gray-600 font-medium leading-relaxed"></textarea>
+            <span id="domainError" class="text-red-400 text-xs font-bold mt-2 hidden block bg-red-500/10 p-2 rounded-lg border border-red-500/20"></span>
+          </div>
+        </div>
+        
+        <div class="mt-8 flex gap-3">
+          <button id="btnCancelGroup" class="flex-1 px-4 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-transparent text-gray-300 text-sm font-bold transition-all active:scale-95">Cancel</button>
+          <button id="btnSaveGroup" class="flex-1 px-4 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all active:scale-95">Save Group</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="hidden fixed bottom-8 right-8 bg-[#1e1e2e] text-white px-6 py-4 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] border border-white/10 text-sm font-bold z-50 transform transition-all flex items-center gap-3"></div>
+  </div>
+
+  <script src="js/settings.js?v=3" type="module"></script>
+</body>
+</html>

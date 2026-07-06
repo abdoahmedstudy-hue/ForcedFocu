@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="assets/icons/icon48.png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ForcedFocus — Stay Focused</title>
+  <meta name="description" content="ForcedFocus: Unbreakable website blocker for macOS productivity." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css?v=3" />
+</head>
+
+<body>
+  <!-- Premium System Sentinel Loader -->
+  <div id="appLoader" class="app-loader" aria-hidden="false">
+    <div class="loader-content">
+      <div class="loader-scanner">
+        <div class="scanner-circle"></div>
+        <div class="scanner-line"></div>
+        <div class="scanner-crosshair"></div>
+      </div>
+      <div class="loader-telemetry">
+        <span class="telemetry-tag">Sentinel SECURE</span>
+        <span class="telemetry-status">Initializing ForcedFocus System...</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="dashboard-layout">
+      <div class="dashboard-sidebar">
+        <!-- Header -->
+        <header class="header">
+          <div class="logo">
+            <div class="logo-icon brand-mark">
+              <img src="assets/icons/block-user.png" alt="Logo">
+            </div>
+            <div>
+              <h1>ForcedFocus</h1>
+              <p class="tagline">Unbreakable Productivity</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <a href="settings.html" class="settings-btn" title="Sound Settings" aria-label="Sound Settings">⚙️</a>
+            <div class="status-badge" id="statusBadge">
+              <span class="status-dot"></span>
+              <span class="status-text">Idle</span>
+            </div>
+          </div>
+        </header>
+        <!-- Timer Section -->
+        <section class="timer-section" id="timerSection">
+          <div class="timer-ring" id="timerRing">
+            <svg viewBox="0 0 200 200">
+              <defs>
+                <linearGradient id="timerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="var(--accent-blue)" />
+                  <stop offset="100%" stop-color="var(--accent-violet)" />
+                </linearGradient>
+              </defs>
+              <circle class="timer-bg" cx="100" cy="100" r="90" />
+              <circle class="timer-progress" id="timerProgress" cx="100" cy="100" r="90" />
+            </svg>
+            <div class="timer-blob"></div>
+            <div class="timer-inner">
+              <div class="timer-value" id="timerValue" role="timer" aria-live="polite">00:00:00</div>
+              <div class="timer-label" id="timerLabel">REMAINING</div>
+            </div>
+          </div>
+          <div class="active-intent" id="activeIntentContainer">
+            <div class="active-intent-text">
+              🎯 Session goal is: '<span id="activeIntentDisplay" dir="auto"
+                class="active-intent-emphasis"></span>'
+            </div>
+            <div class="active-intent-tasks" id="activeIntentTasks"></div>
+          </div>
+          <div class="timer-info" id="timerInfo">
+            <span id="modeDisplay">—</span>
+            <span id="expiresDisplay">—</span>
+            <div class="pomo-status hidden" id="pomoStatus">
+              <div class="pomo-status-row">
+                <span class="pomo-phase-badge focus" id="pomoPhase">FOCUS</span>
+                <span id="pomoCycleDisplay">Cycle 1/4</span>
+              </div>
+              <span class="pomo-next-time" id="pomoNextTimeDisplay">Next break at 1:25 PM</span>
+            </div>
+          </div>
+        </section>
+        <!-- Main Navigation -->
+        <nav class="main-nav" role="tablist">
+          <button class="nav-btn active" data-tab="tab-dashboard" role="tab">
+            <span class="nav-icon" aria-hidden="true">⏱</span> Dashboard
+          </button>
+          <button class="nav-btn" data-tab="tab-rules" role="tab">
+            <span class="nav-icon" aria-hidden="true">🛡️</span> Rules
+          </button>
+          <button class="nav-btn" data-tab="tab-schedules" role="tab">
+            <span class="nav-icon" aria-hidden="true">📅</span> Schedules
+          </button>
+          <button class="nav-btn" data-tab="tab-tracking" role="tab">
+            <span class="nav-icon" aria-hidden="true">📊</span> Tracking
+          </button>
+        </nav>
+
+        <!-- Start/Stop (Global) -->
+        <div class="action-buttons sidebar-actions">
+          <button class="btn btn-start" id="btnStart">Start Blocking</button>
+          <button class="btn btn-stop hidden" id="btnStop">
+            <span class="btn-icon">🔐</span> Request Unlock
+          </button>
+        </div>
+
+        <div class="unlock-info hidden" id="unlockInfo">
+          <p>⏱ Unlock pending — releases at 12:00 (10m left)</p>
+          <button class="btn-continue-focus" id="btnContinueFocus">Continue Focus</button>
+        </div>
+      </div>
+
+      <div class="dashboard-main">
+        <div class="notification-fallback hidden" id="notificationFallback" role="status" aria-live="polite"></div>
+        <!-- TAB: Dashboard -->
+        <div class="tab-pane active" id="tab-dashboard">
+          <section class="controls-section">
+            <!-- Mode Selector -->
+            <div class="card" id="modeCard">
+              <h2 class="card-title">Blocking Mode</h2>
+              <div class="mode-toggle">
+                <button class="mode-btn active" id="btnBlacklist" data-mode="blacklist">
+                  <span class="mode-icon">🚫</span>
+                  <span class="mode-name">Blacklist</span>
+                  <span class="mode-desc">Block listed sites</span>
+                </button>
+                <button class="mode-btn" id="btnWhitelist" data-mode="whitelist">
+                  <span class="mode-icon">✅</span>
+                  <span class="mode-name">Whitelist</span>
+                  <span class="mode-desc">Allow only listed sites</span>
+                </button>
+                <button class="mode-btn" id="btnBan" data-mode="ban">
+                  <span class="mode-icon">⛔</span>
+                  <span class="mode-name">Ban</span>
+                  <span class="mode-desc">Block everything</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Unified Session Settings -->
+            <div class="card" id="sessionSettingsCard">
+              <div class="section-card-header">
+                <h2 class="card-title flush" id="sessionSettingsTitle">
+                  Session Duration
+                </h2>
+
+                <div class="segmented-control">
+                  <button class="session-type-btn active" data-type="standard">
+                    <span>⏱</span> Standard
+                  </button>
+                  <button class="session-type-btn" data-type="pomodoro">
+                    <span>🍅</span> Pomodoro
+                  </button>
+                </div>
+              </div>
+
+              <!-- Standard Duration Controls -->
+              <div id="standardSettingsArea">
+                <div class="duration-grid">
+                  <button class="dur-btn" data-minutes="30">30m</button>
+                  <button class="dur-btn" data-minutes="60">1h</button>
+                  <button class="dur-btn active" data-minutes="120">
+                    2h
+                  </button>
+                  <button class="dur-btn" data-minutes="180">3h</button>
+                  <button class="dur-btn" data-minutes="240">4h</button>
+                  <button class="dur-btn" data-minutes="480">8h</button>
+                </div>
+                <div class="custom-duration">
+                  <label for="customMinutes" class="sr-only">Custom duration in minutes</label>
+                  <input type="number" id="customMinutes" min="1" max="1440" placeholder="Custom (min)" />
+                </div>
+              </div>
+
+              <!-- Pomodoro Controls -->
+              <div id="pomodoroSettingsArea" class="hidden">
+                <div class="pomo-presets">
+                  <button class="dur-btn active pomo-preset" data-focus="25" data-break="5">
+                    25/5
+                  </button>
+                  <button class="dur-btn pomo-preset" data-focus="50" data-break="10">
+                    50/10
+                  </button>
+                  <button class="dur-btn pomo-preset" data-focus="90" data-break="20">
+                    90/20
+                  </button>
+                </div>
+                <div class="pomo-custom">
+                  <div class="pomo-field">
+                    <label for="pomoFocus">Focus (min)</label>
+                    <input type="number" id="pomoFocus" min="1" max="240" value="25" />
+                  </div>
+                  <div class="pomo-field">
+                    <label for="pomoBreak">Break (min)</label>
+                    <input type="number" id="pomoBreak" min="1" max="60" value="5" />
+                  </div>
+                  <div class="pomo-field">
+                    <label for="pomoCycles">Cycles</label>
+                    <input type="number" id="pomoCycles" min="1" max="50" value="4" />
+                  </div>
+                </div>
+                <p class="pomo-summary" id="pomoSummary">
+                  Total: 2h 00m (4 × 25m focus + 5m break)
+                </p>
+              </div>
+            </div>
+
+            <!-- Smart Session Templates -->
+            <div class="card template-card" id="templatesCard">
+              <div class="list-header">
+                <h2 class="card-title flush">
+                  Smart Templates
+                </h2>
+                <span class="list-count" id="templatesCount">0</span>
+              </div>
+              <div class="template-actions">
+                <button class="btn-pill btn-ghost" id="btnSaveTemplate">Save Current Setup</button>
+              </div>
+              <div class="templates-list" id="templatesList">
+                <div class="empty-list">No templates saved yet.</div>
+              </div>
+            </div>
+
+            <!-- Rescue Throne -->
+            <div class="card rescue-card" id="rescueCard">
+              <div class="rescue-header">
+                <h2 class="card-title flush">
+                  🛡️ Rescue Throne
+                </h2>
+                <label for="rescueDuration" class="sr-only">Rescue duration in minutes</label>
+                <select id="rescueDuration" class="rescue-select">
+                  <option value="5">
+                    5 min
+                  </option>
+                  <option value="10" selected>
+                    10 min
+                  </option>
+                  <option value="30">
+                    30 min
+                  </option>
+                </select>
+              </div>
+              <p class="rescue-desc">
+                Emergency lockdown. Blocks <strong>all</strong> websites
+                without exception.
+              </p>
+              <button class="btn btn-rescue" id="btnRescue">
+                Activate Rescue
+              </button>
+            </div>
+          </section>
+        </div>
+        <!-- TAB: Rules -->
+        <div class="tab-pane" id="tab-rules">
+          <section class="lists-section">
+            <!-- Active Groups Selection -->
+            <div class="card list-card span-all" id="groupsCard">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🛡️</span> Domain Groups
+                </h2>
+              </div>
+              <p class="list-desc">
+                Select groups to include in your next session. Configure
+                groups in Settings.
+              </p>
+              <div class="session-groups" id="sessionGroups">
+                <!-- Dynamically populated -->
+                <div class="loading loading-muted">
+                  Loading groups...
+                </div>
+              </div>
+            </div>
+
+            <!-- Permanent Block -->
+            <div class="card list-card perma-block-card span-all">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🔒</span> Permanent Block
+                </h2>
+                <span class="list-count" id="permaBlockCount">0</span>
+              </div>
+              <p class="list-desc">
+                Blocked at all times — even without an active session.
+                Removal requires your passphrase and a 30-minute waiting period.
+              </p>
+              <div class="add-domain">
+                <label for="permaBlockInput" class="sr-only">Domains to permanently block</label>
+                <textarea id="permaBlockInput" placeholder="e.g. tiktok.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add perma-add-btn" id="btnAddPermaBlock" aria-label="Add to permanent block">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="permaBlockDomains"></ul>
+            </div>
+
+            <!-- Blacklist -->
+            <div class="card list-card blacklist-card">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">🚫</span> Blacklist
+                </h2>
+                <span class="list-count" id="blacklistCount">0</span>
+              </div>
+              <p class="list-desc">
+                These sites will be blocked in Blacklist mode.
+              </p>
+              <div class="add-domain">
+                <label for="blacklistInput" class="sr-only">Domains to blacklist</label>
+                <textarea id="blacklistInput" placeholder="e.g. reddit.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add" id="btnAddBlacklist" aria-label="Add to blacklist">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="blacklistDomains"></ul>
+            </div>
+
+            <!-- Whitelist -->
+            <div class="card list-card whitelist-card">
+              <div class="list-header">
+                <h2 class="card-title">
+                  <span class="list-icon">✅</span> Whitelist
+                </h2>
+                <span class="list-count" id="whitelistCount">0</span>
+              </div>
+              <p class="list-desc">
+                Only these sites will be allowed in Whitelist mode.
+              </p>
+              <div class="add-domain">
+                <label for="whitelistInput" class="sr-only">Domains to whitelist</label>
+                <textarea id="whitelistInput" placeholder="e.g. github.com — or paste multiple domains, one per line"
+                  autocomplete="off" rows="1"></textarea>
+                <button class="btn-add" id="btnAddWhitelist" aria-label="Add to whitelist">
+                  +
+                </button>
+              </div>
+              <ul class="domain-list" id="whitelistDomains"></ul>
+            </div>
+          </section>
+        </div>
+
+        <!-- TAB: Schedules -->
+        <div class="tab-pane" id="tab-schedules">
+          <section class="controls-section">
+            <!-- Scheduling Card -->
+            <div class="card" id="scheduleCard">
+              <h2 class="card-title">Create Schedule</h2>
+              <div class="mode-toggle schedule-toggle">
+                <button class="mode-btn schedule-type-btn active" data-type="in">
+                  <span class="mode-icon">⏳</span>
+                  <span class="mode-name">Later</span>
+                </button>
+                <button class="mode-btn schedule-type-btn" data-type="at">
+                  <span class="mode-icon">📅</span>
+                  <span class="mode-name">Time</span>
+                </button>
+              </div>
+              <div class="schedule-inputs">
+                <div id="scheduleInWrapper">
+                  <label for="scheduleIn">Start after (minutes):</label>
+                  <input type="number" id="scheduleIn" min="1" max="1440" placeholder="e.g. 15" />
+                </div>
+                <div id="scheduleAtWrapper" class="hidden">
+                  <label for="scheduleAt">Start on date & time:</label>
+                  <input type="text" id="scheduleAt" class="datetime-picker-trigger" readonly
+                    placeholder="Click to select date & time" />
+                </div>
+              </div>
+              <div class="recurring-summary" id="scheduleSetupSummary" style="margin-top: 15px; text-align: center; margin-bottom: 15px;"></div>
+              <button class="btn-add" id="btnScheduleAdd">Add Schedule</button>
+            </div>
+
+            <!-- Prayer Countdown Card -->
+            <div class="card glass-card hidden" id="prayerCountdownCard">
+              <div class="prayer-header">
+                <div class="prayer-icon-wrapper">
+                  <span class="prayer-icon">🕌</span>
+                </div>
+                <div class="prayer-title-group">
+                  <h2 class="card-title flush" style="margin: 0; font-size: 1rem; color: var(--text-secondary);">Upcoming Prayer</h2>
+                  <span class="prayer-name" id="prayerNameDisplay" style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-top: 4px; display: block;">—</span>
+                </div>
+                <div class="prayer-status-badge" id="prayerStatusBadge">
+                  <span class="status-dot pulsing"></span>
+                  <span class="status-text">Approaching</span>
+                </div>
+              </div>
+              
+              <div class="prayer-countdown-container">
+                <div class="prayer-countdown-value" id="prayerCountdownValue">00:00:00</div>
+                <div class="prayer-countdown-label" id="prayerCountdownLabel">until network ban starts</div>
+              </div>
+
+              <div class="prayer-action-container hidden" id="prayerActionContainer">
+                <p class="prayer-skip-hint">You can skip this block (only available >30 mins before prayer).</p>
+                <button class="btn btn-skip-prayer" id="btnSkipPrayer">
+                  <span class="btn-icon">⏭️</span> Skip Prayer
+                </button>
+              </div>
+
+              <div class="prayer-timeline" id="prayerTimeline">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+
+            <!-- Upcoming Schedules -->
+            <div class="card hidden" id="upcomingSchedulesCard">
+              <div class="list-header list-header-tight">
+                <h2 class="card-title flush">
+                  ⏳ Upcoming Schedules
+                </h2>
+                <span class="list-count" id="upcomingSchedulesCount">0</span>
+              </div>
+              <ul class="domain-list" id="upcomingSchedulesList">
+                <!-- Populated by JS -->
+              </ul>
+            </div>
+
+            <!-- Recurring Schedules -->
+            <div class="card recurring-list" id="recurringSchedulesCard">
+              <div class="list-header">
+                <h2 class="card-title">
+                  🔁 Recurring Schedules
+                </h2>
+                <span class="list-count" id="recurringSchedulesCount">0</span>
+              </div>
+              <p class="list-desc">
+                Automate focus rituals with clear next-run previews and pause/edit controls.
+              </p>
+              <ul class="recurring-list" id="recurringSchedulesList">
+                <!-- Populated by JS -->
+              </ul>
+
+              <div class="add-rule-section">
+                <h3>Add New Recurring Rule</h3>
+                <p>Uses current mode, duration &amp; group settings from above.</p>
+                <label for="recurringName" class="sr-only">Recurring rule name</label>
+                <input type="text" id="recurringName" class="recurring-input recurring-name-input"
+                  placeholder="Rule name, e.g. Weekday Deep Work" />
+                <div class="days-container" id="recurringDays">
+                  <button class="day-btn" data-day="5">Sat</button>
+                  <button class="day-btn" data-day="6">Sun</button>
+                  <button class="day-btn" data-day="0">Mon</button>
+                  <button class="day-btn" data-day="1">Tue</button>
+                  <button class="day-btn" data-day="2">Wed</button>
+                  <button class="day-btn" data-day="3">Thu</button>
+                  <button class="day-btn" data-day="4">Fri</button>
+                </div>
+                <div class="time-container">
+                  <label for="recurringTime" class="sr-only">Time</label>
+                  <input type="text" id="recurringTime" class="recurring-input time-picker-trigger" readonly
+                    placeholder="Click to select time" />
+                </div>
+                <div class="recurring-summary" id="recurringSetupSummary"></div>
+                <button class="btn btn-pill btn-add" id="btnAddRecurring">+ Add Rule</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- TAB: Tracking -->
+        <div class="tab-pane" id="tab-tracking">
+          <section class="tracking-section">
+            <!-- Header + Range Selector -->
+            <div class="card tracking-header-card">
+              <div class="tracking-header">
+                <h2 class="card-title flush"><img src="assets/icons/icon48.png" style="width: 20px; height: 20px; object-fit: contain; margin-right: 2px;"> Focus Analytics</h2>
+                <div class="segmented-control tracking-range-selector">
+                  <button class="tracking-range-btn active" data-range="today">Today</button>
+                  <button class="tracking-range-btn" data-range="yesterday">Yesterday</button>
+                  <button class="tracking-range-btn" data-range="week">Week</button>
+                  <button class="tracking-range-btn" data-range="month">Month</button>
+                  <button class="tracking-range-btn" data-range="year">Year</button>
+                  <button class="tracking-range-btn" data-range="all">All</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Summary: KPIs + Streak -->
+            <div class="tracking-summary-group">
+              <div class="tracking-kpi-grid">
+                <div class="card tracking-kpi-card" id="kpiNetFocusTime">
+                  <div class="kpi-icon">⏱</div>
+                  <div class="kpi-value" id="kpiValueNetFocusTime">0h 0m</div>
+                  <div class="kpi-label">Net Focus Hours</div>
+                  <div class="kpi-accent kpi-accent-blue"></div>
+                </div>
+                <div class="card tracking-kpi-card" id="kpiTotalFocusTime">
+                  <div class="kpi-icon">📈</div>
+                  <div class="kpi-value" id="kpiValueTotalFocusTime">0h 0m</div>
+                  <div class="kpi-label">Total Focus Hours</div>
+                  <div class="kpi-accent kpi-accent-green"></div>
+                </div>
+                <div class="card tracking-kpi-card" id="kpiSessions">
+                  <div class="kpi-icon">🎯</div>
+                  <div class="kpi-value" id="kpiValueSessions">0</div>
+                  <div class="kpi-label">Sessions</div>
+                  <div class="kpi-accent kpi-accent-violet"></div>
+                </div>
+                <div class="card tracking-kpi-card" id="kpiPercentageFocus">
+                  <div class="kpi-icon">✅</div>
+                  <div class="kpi-value" id="kpiValuePercentageFocus">0%</div>
+                  <div class="kpi-label">Percentage Focus</div>
+                  <div class="kpi-accent kpi-accent-amber"></div>
+                </div>
+              </div>
+
+              <div class="card tracking-streak-card">
+                <div class="streak-content">
+                  <div class="streak-item">
+                    <div class="streak-flame">🔥</div>
+                    <div class="streak-info">
+                      <div class="streak-value" id="streakCurrent">0</div>
+                      <div class="streak-label">Day Streak</div>
+                    </div>
+                  </div>
+                  <div class="streak-divider"></div>
+                  <div class="streak-item">
+                    <div class="streak-flame">🏆</div>
+                    <div class="streak-info">
+                      <div class="streak-value" id="streakLongest">0</div>
+                      <div class="streak-label">Best Streak</div>
+                    </div>
+                  </div>
+                  <div class="streak-divider"></div>
+                  <div class="streak-item">
+                    <div class="streak-flame">⏳</div>
+                    <div class="streak-info">
+                      <div class="streak-value" id="streakLongestSession">0m</div>
+                      <div class="streak-label">Longest Session</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Charts: Bar + Heatmap -->
+            <div class="tracking-charts-group">
+              <div class="card tracking-chart-card">
+                <h2 class="card-title">Daily Focus</h2>
+                <div class="tracking-bar-chart" id="trackingBarChart">
+                  <div class="tracking-empty-state" id="chartEmptyState">No session data for this period.</div>
+                </div>
+              </div>
+
+              <div class="card tracking-heatmap-card">
+                <h2 class="card-title">Peak Focus Hours</h2>
+                <div class="tracking-heatmap-container">
+                  <div class="heatmap-hour-labels" id="heatmapHourLabels"></div>
+                  <div class="tracking-heatmap-grid" id="trackingHeatmap"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Breakdown: Mode + Type -->
+            <div class="tracking-breakdown-row">
+              <div class="card tracking-breakdown-card">
+                <h2 class="card-title">Mode</h2>
+                <div class="breakdown-bar-container" id="modeBreakdown">
+                  <div class="breakdown-empty">No data</div>
+                </div>
+                <div class="breakdown-legend" id="modeLegend"></div>
+              </div>
+              <div class="card tracking-breakdown-card">
+                <h2 class="card-title">Session Type</h2>
+                <div class="breakdown-bar-container" id="typeBreakdown">
+                  <div class="breakdown-empty">No data</div>
+                </div>
+                <div class="breakdown-legend" id="typeLegend"></div>
+              </div>
+            </div>
+
+            <!-- Recent Sessions -->
+            <div class="card tracking-recent-card">
+              <div class="list-header">
+                <h2 class="card-title flush">Recent Sessions</h2>
+                <span class="list-count" id="recentSessionsCount">0</span>
+              </div>
+              <div class="tracking-recent-list" id="trackingRecentList">
+                <div class="tracking-empty-state">No sessions recorded yet.</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Template Modal -->
+    <div class="modal-overlay hidden" id="templateModal">
+      <div class="modal">
+        <h2>Save Template</h2>
+        <p>Save the current mode, duration, groups, and optional intent.</p>
+        <form id="templateForm" onsubmit="return false;">
+          <label for="templateNameInput" class="sr-only">Template name</label>
+          <input type="text" id="templateNameInput" placeholder="e.g. Deep Work 2h" autocomplete="off" />
+          <label for="templateIntentInput" class="sr-only">Default intent</label>
+          <input type="text" id="templateIntentInput" dir="auto" placeholder="Optional default intent" autocomplete="off"
+            class="template-intent-input" />
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelTemplate">Cancel</button>
+          <button class="btn btn-start" id="btnConfirmTemplate">Save Template</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stop Modal -->
+    <div class="modal-overlay hidden" id="stopModal">
+      <div class="modal modal-unlock-session">
+        <div class="modal-icon">🔐</div>
+        <h2>Unlock Session</h2>
+        <p>
+          Enter your kill-switch passphrase.<br />
+          <strong class="warning-emphasis">Blocking will continue for 20 more minutes</strong> after
+          verification.
+        </p>
+        <form id="passphraseForm" onsubmit="return false;">
+          <label for="passphraseInput" class="sr-only">Kill-switch passphrase</label>
+          <input type="password" id="passphraseInput" placeholder="Kill-switch passphrase" autocomplete="off" />
+        </form>
+        <div class="modal-actions spaced">
+          <button class="btn btn-cancel modal-action-secondary" id="btnCancelStop">Cancel</button>
+          <button class="btn btn-confirm modal-action-primary" id="btnConfirmStop">
+            Confirm Unlock
+          </button>
+        </div>
+        <p class="modal-error hidden" id="modalError"></p>
+      </div>
+    </div>
+
+    <!-- Permanent Unblock Modal -->
+    <div class="modal-overlay hidden" id="permaUnblockModal">
+      <div class="modal modal-perma-unblock">
+        <div class="modal-icon">🔓</div>
+        <h2>Permanent Unblock</h2>
+        <p>
+          Enter your kill-switch passphrase to request unblocking of the domain.<br />
+          <strong class="warning-emphasis">Unblocking will take effect after a 30-minute delay</strong>.
+        </p>
+        <form id="permaUnblockForm" onsubmit="return false;">
+          <label for="permaUnblockInput" class="sr-only">Kill-switch passphrase</label>
+          <input type="password" id="permaUnblockInput" placeholder="Kill-switch passphrase" autocomplete="off" />
+        </form>
+        <div class="modal-actions spaced">
+          <button class="btn btn-cancel modal-action-secondary" id="btnCancelPermaUnblock">Cancel</button>
+          <button class="btn btn-confirm modal-action-primary" id="btnConfirmPermaUnblock">
+            Request Unblock
+          </button>
+        </div>
+        <p class="modal-error hidden" id="permaUnblockError"></p>
+      </div>
+    </div>
+
+    <!-- Block Details Modal -->
+    <div class="modal-overlay hidden" id="blockDetailsModal">
+      <div class="modal">
+        <h2>📋 Block Details</h2>
+        <p>Review your session configuration before starting.</p>
+        <div class="block-details-grid" id="blockDetailsGrid">
+          <div class="detail-card">
+            <div class="detail-card-label">Block Type</div>
+            <div class="detail-card-value" id="wdDetailType">—</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Session Type</div>
+            <div class="detail-card-value" id="wdDetailSession">—</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Duration</div>
+            <div class="detail-card-value" id="wdDetailDuration">—</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Expires At</div>
+            <div class="detail-card-value" id="wdDetailExpiry">—</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Groups</div>
+            <div class="detail-card-value" id="wdDetailGroups">—</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Domains</div>
+            <div class="detail-card-value" id="wdDetailDomains">—</div>
+          </div>
+        </div>
+        <div class="block-details-error hidden" id="wdBlockDetailsError">
+          <span id="wdBlockDetailsErrorMsg"></span>
+          <button class="btn btn-pill btn-ghost" id="wdBlockDetailsRetry">↻ Retry</button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="wdBtnCancelDetails">Cancel</button>
+          <button class="btn btn-start" id="wdBtnConfirmDetails">Confirm & Start</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Intent Modal -->
+    <div class="modal-overlay hidden" id="intentModal">
+      <div class="modal">
+        <h2>🎯 Focus Intent</h2>
+        <p>What is your primary goal for this session?</p>
+        <form id="intentForm" onsubmit="return false;">
+          <label for="intentModalInput" class="sr-only">Focus Intent</label>
+          <input type="text" id="intentModalInput" dir="auto" placeholder="e.g. Finish the Q3 presentation"
+            autocomplete="off" />
+          <label for="intentTasksInput" class="sr-only">Tasks (optional, one per line)</label>
+          <textarea id="intentTasksInput" dir="auto"
+            placeholder="Optional: list subtasks here (one per line)&#10;e.g.&#10;- Outline slides&#10;- Find images"
+            rows="3" class="textarea-control"></textarea>
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelIntent">Cancel</button>
+          <button class="btn btn-start" id="btnConfirmIntent">
+            Start Focus
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recurring Schedule Edit Modal -->
+    <div class="modal-overlay hidden" id="recurringEditModal">
+      <div class="modal">
+        <h2>Edit Recurring Schedule</h2>
+        <p>Adjust the ritual without changing any currently active session.</p>
+        <form id="recurringEditForm" onsubmit="return false;">
+          <label for="recurringEditName" class="sr-only">Schedule name</label>
+          <input type="text" id="recurringEditName" placeholder="Schedule name" autocomplete="off" />
+
+          <div class="days-container edit-days-container" id="recurringEditDays">
+            <button class="day-btn" data-day="5">Sat</button>
+            <button class="day-btn" data-day="6">Sun</button>
+            <button class="day-btn" data-day="0">Mon</button>
+            <button class="day-btn" data-day="1">Tue</button>
+            <button class="day-btn" data-day="2">Wed</button>
+            <button class="day-btn" data-day="3">Thu</button>
+            <button class="day-btn" data-day="4">Fri</button>
+          </div>
+
+          <div class="recurring-edit-grid">
+            <label id="recurringEditTimeField">
+              <span>Time</span>
+              <input type="text" id="recurringEditTime" class="recurring-input time-picker-trigger" readonly placeholder="09:00" autocomplete="off" />
+            </label>
+            <label id="recurringEditDurationField">
+              <span>Duration</span>
+              <input type="number" id="recurringEditDuration" min="1" max="1440" />
+            </label>
+            <label id="recurringEditModeField">
+              <span>Mode</span>
+              <select id="recurringEditMode">
+                <option value="blacklist">Blacklist</option>
+                <option value="whitelist">Whitelist</option>
+              </select>
+            </label>
+            <label id="recurringEditTypeField">
+              <span>Type</span>
+              <select id="recurringEditType">
+                <option value="standard">Standard</option>
+                <option value="pomodoro">Pomodoro</option>
+                <option value="rescue">Rescue</option>
+              </select>
+            </label>
+            <label id="recurringEditFocusField">
+              <span>Focus</span>
+              <input type="number" id="recurringEditFocus" min="1" max="240" />
+            </label>
+            <label id="recurringEditBreakField">
+              <span>Break</span>
+              <input type="number" id="recurringEditBreak" min="1" max="60" />
+            </label>
+            <label id="recurringEditCyclesField">
+              <span>Cycles</span>
+              <input type="number" id="recurringEditCycles" min="1" max="50" />
+            </label>
+          </div>
+          <div class="sr-only">Groups</div>
+          <div class="session-groups" id="recurringEditGroups"></div>
+          <label class="recurring-enabled-row" for="recurringEditEnabled">
+            <input type="checkbox" id="recurringEditEnabled" />
+            <span>Active</span>
+          </label>
+        </form>
+        <div class="modal-actions">
+          <button class="btn btn-cancel" id="btnCancelRecurringEdit">Cancel</button>
+          <button class="btn btn-start" id="btnSaveRecurringEdit">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recap Modal -->
+    <div class="modal-overlay hidden" id="recapModal">
+      <div class="modal modal-md modal-centered">
+        <div class="recap-icon">🎊</div>
+        <h2 id="recapTitle">Session Recap</h2>
+        <p id="recapSubTitle">Here is what you achieved during this session.</p>
+
+        <div class="recap-content">
+          <div class="recap-section">
+            <span class="overline">Original
+              Goal</span>
+            <div class="recap-goal" id="recapIntentDisplay" dir="auto">
+            </div>
+          </div>
+
+          <div id="recapTasksSection">
+            <span class="overline">Tasks
+              Breakdown</span>
+            <div class="recap-tasks-list" id="recapTasksList">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-start btn-fluid" id="btnContinueRecap">Great Job!</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Datetime Picker Modal -->
+    <div class="modal-overlay hidden" id="datetimePickerModal">
+      <div class="modal datetime-picker-modal modal-sm">
+        <h2 class="picker-title" id="pickerTitle">Select Date &amp; Time
+        </h2>
+
+        <!-- Live selection preview -->
+        <div class="picker-preview" id="pickerPreview">
+          Select a date
+        </div>
+
+        <div class="picker-content">
+          <!-- Calendar Section (for Date selection) -->
+          <div class="picker-date-section" id="pickerDateSection">
+            <div class="calendar-header">
+              <button type="button" class="btn-cal-nav" id="prevMonthBtn" aria-label="Previous month">&lt;</button>
+              <span class="calendar-month-year" id="currentMonthYear">May 2026</span>
+              <button type="button" class="btn-cal-nav" id="nextMonthBtn" aria-label="Next month">&gt;</button>
+            </div>
+            <div class="calendar-weekdays">
+              <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+            </div>
+            <div class="calendar-days" id="calendarDaysGrid">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- Time Section -->
+          <div class="picker-time-section">
+            <div class="picker-time-label">
+              Set Time
+            </div>
+            <div class="picker-time-inputs">
+              <div class="time-spinner">
+                <button type="button" class="time-spinner-btn" id="hourUpBtn" aria-label="Increase hour">▲</button>
+                <input type="number" class="time-number-input" id="pickerHour" min="0" max="23" value="12"
+                  readonly>
+                <button type="button" class="time-spinner-btn" id="hourDownBtn" aria-label="Decrease hour">▼</button>
+              </div>
+              <span class="time-separator">:</span>
+              <div class="time-spinner">
+                <button type="button" class="time-spinner-btn" id="minuteUpBtn" aria-label="Increase minute">▲</button>
+                <input type="number" class="time-number-input" id="pickerMinute" min="0" max="59" value="00"
+                  readonly>
+                <button type="button" class="time-spinner-btn" id="minuteDownBtn" aria-label="Decrease minute">▼</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions compact">
+          <button class="btn btn-cancel modal-action-secondary" id="cancelPickerBtn">Cancel</button>
+          <button class="btn btn-start modal-action-secondary" id="savePickerBtn">Set</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <script type="module" src="js/app.js?v=templates"></script>
+</body>
+
+</html>

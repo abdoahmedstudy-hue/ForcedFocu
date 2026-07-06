@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="icons/icon48.png" />
+    <title>Blocked — ForcedFocus</title>
+    <link rel="stylesheet" href="./shared/tokens.css" />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg-primary, #040408);
+        font-family:
+          "Inter",
+          -apple-system,
+          sans-serif;
+        color: var(--text-primary, #fcfcfd);
+        overflow: hidden;
+        position: relative;
+      }
+      body::before,
+      body::after {
+        content: "";
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(120px);
+        opacity: 0.15;
+        pointer-events: none;
+        z-index: 0;
+      }
+      body::before {
+        width: 600px;
+        height: 600px;
+        background: #6366f1;
+        top: -200px;
+        right: -200px;
+      }
+      body::after {
+        width: 500px;
+        height: 500px;
+        background: #8b5cf6;
+        bottom: -150px;
+        left: -150px;
+      }
+      .container {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        padding: 3rem;
+        max-width: 500px;
+        background: var(--bg-card, rgba(12, 12, 25, 0.6));
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+        border-radius: var(--radius-lg, 24px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        transform: translateY(0);
+        transition: all 0.4s ease;
+      }
+      .container:hover {
+        transform: translateY(-5px);
+        box-shadow:
+          0 16px 40px rgba(0, 0, 0, 0.5),
+          0 0 30px rgba(244, 63, 94, 0.1);
+        background: rgba(20, 20, 45, 0.8);
+      }
+      .icon {
+        font-size: 5rem;
+        margin-bottom: 1.5rem;
+        animation: pulse 2s ease-in-out infinite;
+        filter: drop-shadow(0 0 15px rgba(244, 63, 94, 0.3));
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scale(1.1);
+          opacity: 0.8;
+        }
+      }
+      h1 {
+        font-size: 2rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        background: linear-gradient(135deg, #f43f5e, #ec4899);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .domain {
+        font-size: 1.1rem;
+        color: #94a3b8;
+        margin-bottom: 2rem;
+        font-family: monospace;
+        padding: 0.5rem 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        display: inline-block;
+      }
+      .message {
+        font-size: 1rem;
+        color: #64748b;
+        line-height: 1.6;
+      }
+      .badge {
+        display: inline-block;
+        padding: 0.5rem 1.2rem;
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border-radius: var(--radius-sm, 12px);
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-top: 1.5rem;
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+        transition: all 0.3s ease;
+      }
+      .badge:hover {
+        background: rgba(239, 68, 68, 0.25);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+        transform: scale(1.05);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+        .container:hover,
+        .badge:hover {
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">🛡️</div>
+      <h1>Site Blocked</h1>
+      <div class="domain" id="blockedDomain">—</div>
+      <p class="message">
+        This site is blocked by ForcedFocus.<br />
+        Stay focused — you've got this! 💪
+      </p>
+      <div class="badge">⚡ ForcedFocus Active</div>
+    </div>
+    <script type="module" src="blocked.js"></script>
+  </body>
+</html>

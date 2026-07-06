@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="assets/icons/icon48.png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ForcedFocus Menu Bar</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/menubar.css" />
+</head>
+
+<body class="bg-transparent m-0 p-0 overflow-hidden w-full h-full touch-none select-none text-text-primary">
+  <div class="p-4 flex flex-col gap-2 h-screen box-border overflow-y-auto [&::-webkit-scrollbar]:hidden" id="appContainer">
+    
+    <header class="flex justify-between items-center mb-0.5">
+      <div class="flex items-center gap-2">
+        <div class="logo-icon-pulse text-[18px] w-10 h-10 flex items-center justify-center">⚡</div>
+        <h2 class="text-sm m-0 font-bold text-white tracking-tight">
+          ForcedFocus
+        </h2>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="group flex items-center gap-2 px-3 py-1.5 bg-white/5 backdrop-blur-md saturate-150 border border-white/10 rounded-full text-sm font-medium transition-all [&.active]:border-danger [&.active]:shadow-[0_0_20px_rgba(244,63,94,0.3)]" id="mbBadge">
+          <div class="status-dot-ripple w-2 h-2 rounded-full bg-success group-[.active]:bg-danger group-[.active]:shadow-[0_0_10px_var(--color-danger)]"></div>
+          <span class="status-text text-[10px] uppercase tracking-wide group-[.active]:text-danger">Idle</span>
+        </div>
+        <a href="http://127.0.0.1:7070" class="w-[26px] h-[26px] flex items-center justify-center bg-white/5 border border-white/10 rounded-[10px] text-text-secondary no-underline text-xs transition-all hover:bg-white/10 hover:text-white hover:border-border-active" title="Open Full Dashboard">↗</a>
+      </div>
+    </header>
+    
+    <div class="hidden px-2.5 py-2.5 border border-amber-500/35 rounded-[10px] bg-amber-500/12 text-amber-100 text-[11px] leading-snug break-all" id="mbNotificationFallback" role="status" aria-live="polite"></div>
+
+    <!-- IDLE STATE -->
+    <div id="idleState" class="flex-1 flex flex-col">
+      <!-- Mode Switcher -->
+      <div class="flex gap-2.5 mb-2.5">
+        <button class="chip mode-chip active flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="blacklist">
+          🚫 Blacklist
+        </button>
+        <button class="chip mode-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="whitelist">
+          ✅ Whitelist
+        </button>
+        <button class="chip mode-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="ban">
+          ⛔ Ban
+        </button>
+      </div>
+
+      <!-- Session Type Switcher -->
+      <div class="flex gap-2.5 mb-2.5">
+        <button class="chip type-chip active flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-type="standard">
+          ⏱ Standard
+        </button>
+        <button class="chip type-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-type="pomodoro">
+          🍅 Pomodoro
+        </button>
+      </div>
+
+      <!-- Standard Section -->
+      <div id="standardSection">
+        <div class="grid grid-cols-4 gap-2 mb-2.5">
+          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="30">30m</button>
+          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="60">1h</button>
+          <button class="chip dur-chip active bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="120">2h</button>
+          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="240">4h</button>
+        </div>
+        <div class="flex flex-col gap-1 mb-2">
+          <input type="number" id="customMin" placeholder="Custom Minutes" class="bg-black/20 border border-white/10 text-white p-1.5 rounded-[10px] text-[11px] w-full outline-none focus:border-white/30 transition-colors" />
+        </div>
+      </div>
+
+      <!-- Pomodoro Section -->
+      <div id="pomoSection" class="hidden">
+        <div class="grid grid-cols-3 gap-2 mb-2.5">
+          <button class="chip pomo-chip active bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="25" data-break="5">
+            25/5
+          </button>
+          <button class="chip pomo-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="50" data-break="10">
+            50/10
+          </button>
+          <button class="chip pomo-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="90" data-break="20">
+            90/20
+          </button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-2.5">
+          <div class="flex flex-col gap-0.5">
+            <label for="pomoFocus" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Focus</label>
+            <input type="number" id="pomoFocus" value="25" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+          </div>
+          <div class="flex flex-col gap-0.5">
+            <label for="pomoBreak" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Break</label>
+            <input type="number" id="pomoBreak" value="5" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+          </div>
+          <div class="flex flex-col gap-0.5">
+            <label for="pomoCycles" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Cycles</label>
+            <input type="number" id="pomoCycles" value="4" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+          </div>
+        </div>
+      </div>
+
+      <div id="groupSection" class="group-section hidden mb-2 p-2.5 bg-white/5 border border-white/5 rounded-[14px]">
+        <div class="flex justify-between items-center mb-1.5">
+          <span class="text-[10px] font-extrabold text-text-muted uppercase tracking-wider">🛡️ Domain Groups</span>
+          <span class="text-[9px] font-extrabold text-accent-blue bg-indigo-500/10 px-1.5 py-0.5 rounded-full" id="groupCount">0 selected</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5 max-h-[80px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-sm" id="groupGrid">
+          <!-- Groups populated by JS -->
+        </div>
+      </div>
+
+      <!-- Smart Session Templates -->
+      <div id="mbTemplatesSection" class="hidden mb-2 p-2.5 bg-white/5 border border-white/5 rounded-[14px]">
+        <div class="flex justify-between items-center mb-1.5">
+          <span class="text-[10px] font-extrabold text-text-muted uppercase tracking-wider">🧠 Smart Templates</span>
+          <span class="text-[9px] font-extrabold text-accent-blue bg-indigo-500/10 px-1.5 py-0.5 rounded-full" id="mbTemplatesCount">0 saved</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5 max-h-[80px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-sm" id="mbTemplatesList">
+          <!-- Templates populated by JS -->
+        </div>
+      </div>
+
+      <!-- Rescue Section -->
+      <div class="bg-red-500/5 border border-red-500/10 rounded-[18px] p-3 mb-1">
+        <div class="flex justify-between items-center mb-1.5">
+          <span class="text-xs font-extrabold text-red-400">🛡️ Rescue Throne</span>
+          <select id="rescueDur" class="bg-transparent border-none text-white text-[10px] outline-none appearance-none cursor-pointer">
+            <option value="5">5m</option>
+            <option value="10" selected>10m</option>
+            <option value="30">30m</option>
+          </select>
+        </div>
+        <button class="w-full p-2 bg-red-500/10 text-white border border-red-500/20 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:bg-red-500/20 hover:border-red-500" id="mbBtnRescue">Activate Rescue</button>
+      </div>
+
+      <button class="bg-[linear-gradient(135deg,var(--color-accent-blue),var(--color-accent-violet))] text-white border-none p-3 rounded-full font-bold text-[13px] cursor-pointer mt-auto transition-transform hover:-translate-y-0.5 hover:scale-[1.02] active:translate-y-px active:scale-[0.98]" id="mbBtnStart">Start Session</button>
+    </div>
+
+    <!-- BLOCK DETAILS STATE -->
+    <div id="blockDetailsState" class="hidden flex flex-col items-center justify-center flex-1 gap-3 p-5">
+      <div class="text-[32px] drop-shadow-[0_4px_10px_rgba(0,0,0,0.3)]">📋</div>
+      <h3 class="m-0 text-[15px] font-bold text-white">Block Details</h3>
+      <p class="-mt-1.5 text-[11px] text-text-muted text-center">Review your session configuration.</p>
+      
+      <div class="w-full flex flex-col gap-1.5 mt-1">
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Type</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailType">—</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Session</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailSession">—</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Duration</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailDuration">—</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Expires</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailExpiry">—</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Groups</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailGroups">—</span>
+        </div>
+        <div class="flex justify-between items-center py-1.5 px-2.5 bg-white/5 border border-white/5 rounded-lg">
+          <span class="text-[10px] font-extrabold uppercase text-text-muted tracking-[0.5px]">Domains</span>
+          <span class="text-[11px] font-bold text-white text-right" id="mbDetailDomains">—</span>
+        </div>
+      </div>
+      
+      <div class="hidden w-full flex justify-between items-center py-1.5 px-2.5 bg-red-500/5 border border-red-500/20 rounded-lg text-[10px] text-red-500 mt-1" id="mbBlockDetailsError">
+        <span id="mbBlockDetailsErrorMsg"></span>
+        <button class="bg-transparent border border-red-500/30 text-red-500 py-0.5 px-1.5 rounded-md text-[9px] font-bold cursor-pointer hover:bg-red-500/10" id="mbBlockDetailsRetry">↻ Retry</button>
+      </div>
+
+      <div class="flex gap-2 w-full mt-1.5">
+        <button id="mbBtnCancelDetails" class="flex-1 p-2.5 bg-white/5 border-none rounded-xl text-white/60 font-inherit text-xs font-semibold cursor-pointer hover:bg-white/10 hover:text-white transition-colors">Cancel</button>
+        <button id="mbBtnConfirmDetails" class="flex-[2] p-2.5 bg-[linear-gradient(135deg,var(--color-accent-blue),var(--color-accent-violet))] border-none rounded-xl text-white font-inherit text-xs font-bold cursor-pointer hover:opacity-90 transition-opacity">Confirm</button>
+      </div>
+    </div>
+
+    <!-- INTENT DIALOG STATE -->
+    <div id="intentState" class="hidden flex flex-col items-center justify-center flex-1 gap-4 p-5">
+      <div class="text-[40px] drop-shadow-[0_4px_10px_rgba(0,0,0,0.3)]">🎯</div>
+      <h3 class="m-0 text-base font-bold text-white">What's your focus?</h3>
+      <p class="-mt-2 text-[11px] text-text-muted text-center">Set an intention for this session.</p>
+      <input type="text" id="intentPromptInput" dir="auto" placeholder="I will..." autocomplete="off" class="w-full py-3 px-4 bg-white/5 border border-white/15 rounded-xl text-white font-inherit text-sm text-left outline-none transition-all focus:bg-white/10 focus:border-white/30" />
+      <textarea id="intentTasksInput" dir="auto" placeholder="Optional: subtasks (one per line)&#10;e.g.&#10;- Read PR&#10;- Leave review" rows="3" class="w-full p-2.5 bg-white/[0.03] border border-white/10 rounded-[10px] text-white font-inherit text-xs outline-none resize-y box-border focus:bg-white/5 focus:border-white/20 transition-colors"></textarea>
+      <div class="flex gap-2 w-full mt-1">
+        <button id="btnIntentCancel" class="flex-1 p-2.5 bg-white/5 border-none rounded-xl text-white/60 font-inherit text-xs font-semibold cursor-pointer hover:bg-white/10 hover:text-white transition-colors">
+          Cancel
+        </button>
+        <button id="btnIntentConfirm" class="flex-[2] p-2.5 bg-[linear-gradient(135deg,var(--color-accent-blue),var(--color-accent-violet))] border-none rounded-xl text-white font-inherit text-xs font-bold cursor-pointer hover:opacity-90 transition-opacity">
+          Begin
+        </button>
+      </div>
+    </div>
+
+    <!-- ACTIVE STATE -->
+    <div id="activeState" class="hidden flex flex-col items-center justify-center flex-1 gap-3">
+      <div class="timer-ring group relative flex items-center justify-center my-2.5 w-[140px] h-[140px]">
+        <svg viewBox="0 0 200 200" class="absolute top-0 left-0 w-full h-full -rotate-90">
+          <circle class="fill-none stroke-white/10 stroke-[14]" cx="100" cy="100" r="90" />
+          <circle class="timer-progress fill-none stroke-accent-blue stroke-[14] stroke-linecap-round transition-[stroke] duration-300 group-[.break]:stroke-success" id="mbProgress" cx="100" cy="100" r="90" stroke-dasharray="565.48" stroke-dashoffset="0" />
+        </svg>
+        <div class="flex flex-col items-center justify-center text-center z-10">
+          <div class="font-bold text-[32px] tabular-nums leading-none text-white" id="mbTime">
+            00:00
+          </div>
+          <div class="mt-1 font-bold tracking-[1px] text-[9px] text-text-muted uppercase" id="mbLabel">
+            REMAINING
+          </div>
+        </div>
+      </div>
+
+      <div id="activeIntentContainer" class="hidden w-full mt-1 p-2.5 bg-indigo-500/15 border border-indigo-500/30 rounded-[14px] text-left box-border">
+        <div class="text-[11px] text-text-secondary font-medium leading-[1.4]">
+          🎯 Session goal is: '<span id="activeIntentDisplay" dir="auto" class="font-bold text-white"></span>'
+        </div>
+        <div id="activeIntentTasks" class="mt-2 text-left text-[11px] text-white"></div>
+      </div>
+
+      <div class="w-full grid grid-cols-2 gap-2 mt-2">
+        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
+          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Mode</span>
+          <span class="text-xs font-extrabold text-white" id="mbInfoMode">—</span>
+        </div>
+        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
+          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Type</span>
+          <span class="text-xs font-extrabold text-white" id="mbInfoType">—</span>
+        </div>
+        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
+          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Expires</span>
+          <span class="text-xs font-extrabold text-white" id="mbInfoExpires">—</span>
+        </div>
+        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5" id="mbNextRow">
+          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Next Phase</span>
+          <span class="text-xs font-extrabold text-white" id="mbInfoNext">—</span>
+          <span id="mbInfoNextTime" class="text-[10px] opacity-70 font-extrabold mt-0.5 tabular-nums">--:--</span>
+        </div>
+      </div>
+
+      <!-- Unlock pending info -->
+      <div class="hidden mt-2.5 w-full box-border" id="mbUnlockInfo">
+        <p class="m-0 text-xs mb-1.5 text-white">⏱ Unlock pending — releases at --:-- (--m left)</p>
+        <button class="w-full bg-accent-blue/20 text-white border border-accent-blue/30 rounded-full p-2 text-xs font-bold hover:bg-accent-blue/30 transition-colors" id="mbBtnContinueFocus">Continue Focus</button>
+      </div>
+
+      <button class="w-full p-[18px] bg-red-500/10 border border-red-500/30 rounded-full text-red-500 text-base font-extrabold uppercase tracking-[1px] cursor-pointer transition-all mt-3 flex items-center justify-center gap-3 hover:bg-red-500/20 hover:border-red-500 hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(239,68,68,0.15)]" id="mbBtnStop">
+        <span>🔐</span> REQUEST UNLOCK
+      </button>
+
+      <!-- S3: Inline unlock dialog -->
+      <div id="unlockDialog" class="hidden mt-2.5 p-3 bg-[#0f0f1e]/95 border border-red-500/30 rounded-[14px] box-border w-full animate-[slideUp_0.3s_cubic-bezier(0.16,1,0.3,1)_forwards]">
+        <p class="text-[11px] text-white/50 mb-2">
+          Enter kill-switch passphrase:
+        </p>
+        <input type="password" id="unlockPassphrase" placeholder="Passphrase" autocomplete="off" class="w-full box-border py-2 px-2.5 bg-white/5 border border-white/10 rounded-[10px] text-white font-inherit text-xs outline-none mb-2" />
+        <div class="flex gap-1.5 box-border w-full">
+          <button id="btnUnlockCancel" class="flex-1 py-[7px] bg-white/5 border-none rounded-[10px] text-white/50 font-inherit text-[11px] font-semibold cursor-pointer box-border hover:bg-white/10 hover:text-white transition-colors">
+            Cancel
+          </button>
+          <button id="btnUnlockConfirm" class="flex-1 py-[7px] bg-red-500 border-none rounded-[10px] text-white font-inherit text-[11px] font-semibold cursor-pointer box-border hover:bg-red-600 transition-colors">
+            Unlock
+          </button>
+        </div>
+        <p id="unlockError" class="hidden text-red-500 text-[10px] mt-1.5 text-center"></p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/menubar.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+@layer theme {
+  @theme {
+    --color-bg-primary: #040408;
+    --color-bg-secondary: #08080f;
+    --color-bg-card: rgba(12, 12, 25, 0.6);
+    --color-bg-card-hover: rgba(18, 18, 35, 0.7);
+    --color-border-subtle: rgba(255, 255, 255, 0.08);
+    --color-border-active: rgba(99, 102, 241, 0.4);
+    
+    --color-text-primary: #fcfcfd;
+    --color-text-secondary: #94a3b8;
+    --color-text-muted: #64748b;
+    
+    --color-accent-blue: #6366f1;
+    --color-accent-violet: #a855f7;
+    
+    --color-danger: #f43f5e;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    
+    --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer base {
+  html, body {
+    background: transparent !important;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    color: var(--color-text-primary);
+  }
+
+  /* Hide webkit spinner arrows for the number inputs */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+/* Retain the complex custom animations and effects */
+@layer utilities {
+  .glass {
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+  }
+
+  /* Complex animations that are hard to do with arbitrary utilities */
+  .logo-icon-pulse {
+    animation: logoPulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  
+  @keyframes logoPulse {
+    0%, 100% {
+      transform: scale(1);
+      filter: brightness(1);
+    }
+    15% {
+      transform: scale(1.08);
+      filter: brightness(1.2) drop-shadow(0 0 15px var(--color-accent-blue));
+    }
+    30% {
+      transform: scale(1);
+      filter: brightness(1);
+    }
+  }
+
+  .status-dot-ripple {
+    position: relative;
+  }
+  .status-dot-ripple::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: inherit;
+    opacity: 0.4;
+    animation: ripple 2s infinite;
+  }
+
+  @keyframes ripple {
+    0% {
+      transform: scale(1);
+      opacity: 0.4;
+    }
+    100% {
+      transform: scale(2.5);
+      opacity: 0;
+    }
+  }
+}
+
+@utility group-chip {
+  @apply px-2 py-1 bg-white/5 border border-white/5 rounded-full text-text-muted text-[10px] font-semibold cursor-pointer transition-all whitespace-nowrap;
+  
+  &:hover {
+    @apply bg-white/10 text-text-secondary;
+  }
+  
+  &.active {
+    @apply bg-indigo-500/15 border-accent-blue text-white;
+  }
+}
+
+@utility intent-task-item {
+  @apply flex items-start gap-2 py-1.5 border-b border-white/5;
+  
+  &:last-child {
+    @apply border-b-0;
+  }
+}
+
+@utility custom-checkbox {
+  @apply appearance-none w-[14px] h-[14px] border-[1.5px] border-white/30 rounded bg-transparent cursor-pointer relative shrink-0 mt-px;
+  
+  &:checked {
+    @apply bg-success border-success;
+  }
+  
+  &:checked::after {
+    content: "✓";
+    @apply absolute text-white text-[10px] font-bold left-[2px] -top-px;
+  }
+}

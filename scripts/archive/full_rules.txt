@@ -1,0 +1,16 @@
+table <ff_blocked_ips> persist
+table <ff_whitelisted_ips> persist
+rdr pass on lo0 proto tcp from any to any port 443 -> 127.0.0.1 port 8443
+pass out quick on lo0 all
+pass in quick on lo0 all
+pass out quick proto {tcp udp} from any to 8.8.8.8 port 53
+block return out proto udp from any to any port 443
+block return out proto {tcp udp} from any to any port 853
+block return out proto tcp from any to any port 22
+block return out quick from any to <ff_blocked_ips>
+pass out quick from any to <ff_whitelisted_ips>
+pass out on en0 route-to lo0 proto tcp from any to any port 443
+block return out proto tcp from any to any port 80
+block return out proto tcp from any to 1.1.1.1 port 443
+block return out proto tcp from any to 8.8.8.8 port 443
+
