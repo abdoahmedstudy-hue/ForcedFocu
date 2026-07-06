@@ -254,12 +254,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
             }
             
             if sessionType == "prayer" {
-                if let img = NSImage(systemSymbolName: "hands.sparkles.fill", accessibilityDescription: nil) {
-                    img.isTemplate = true
-                    statusItem.button?.image = img
-                }
-                statusItem.button?.imagePosition = .imageLeft
-                setTitle("PRAYER")
+                statusItem.button?.image = nil
+                setTitle("🕌 PRAYER")
                 return
             }
             
@@ -333,7 +329,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
             }
             
             var prayerCountdownShown = false
-            if !scheduleCountdownShown, let prayerSecs = json["next_prayer_seconds"] as? Int, prayerSecs <= 1800 {
+            if !scheduleCountdownShown, let prayerSecs = json["next_prayer_seconds"] as? Int, prayerSecs <= 300 {
                 let m = prayerSecs / 60
                 let s = prayerSecs % 60
                 let timeStr: String
@@ -342,7 +338,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, WKScriptM
                 } else {
                     timeStr = String(format: "%2dm", m)
                 }
-                if let img = NSImage(systemSymbolName: "hands.sparkles.fill", accessibilityDescription: nil) {
+                if let img = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil) {
                     img.isTemplate = true
                     statusItem.button?.image = img
                 }

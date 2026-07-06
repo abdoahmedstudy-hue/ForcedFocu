@@ -11,9 +11,9 @@
 </head>
 
 <body class="bg-transparent m-0 p-0 overflow-hidden w-full h-full touch-none select-none text-text-primary">
-  <div class="p-4 flex flex-col gap-2 h-screen box-border overflow-y-auto [&::-webkit-scrollbar]:hidden" id="appContainer">
+  <div class="p-5 flex flex-col gap-3 h-screen box-border overflow-y-auto [&::-webkit-scrollbar]:hidden" id="appContainer">
     
-    <header class="flex justify-between items-center mb-0.5">
+    <header class="flex justify-between items-center mb-1">
       <div class="flex items-center gap-2">
         <div class="logo-icon-pulse text-[18px] w-10 h-10 flex items-center justify-center">⚡</div>
         <h2 class="text-sm m-0 font-bold text-white tracking-tight">
@@ -32,76 +32,76 @@
     <div class="hidden px-2.5 py-2.5 border border-amber-500/35 rounded-[10px] bg-amber-500/12 text-amber-100 text-[11px] leading-snug break-all" id="mbNotificationFallback" role="status" aria-live="polite"></div>
 
     <!-- IDLE STATE -->
-    <div id="idleState" class="flex-1 flex flex-col">
+    <div id="idleState" class="flex-1 flex flex-col pb-16">
       <!-- Mode Switcher -->
-      <div class="flex gap-2.5 mb-2.5">
-        <button class="chip mode-chip active flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="blacklist">
+      <div class="flex p-1 gap-1 mb-3 bg-black/20 rounded-full border border-white/5 shadow-inner">
+        <button class="chip mode-chip active flex-1 bg-transparent border-none text-text-secondary py-1.5 px-2 rounded-full text-[11px] font-medium cursor-pointer transition-all text-center hover:text-white [&.active]:bg-white/10 [&.active]:text-white [&.active]:shadow-sm" data-mode="blacklist">
           🚫 Blacklist
         </button>
-        <button class="chip mode-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="whitelist">
+        <button class="chip mode-chip flex-1 bg-transparent border-none text-text-secondary py-1.5 px-2 rounded-full text-[11px] font-medium cursor-pointer transition-all text-center hover:text-white [&.active]:bg-white/10 [&.active]:text-white [&.active]:shadow-sm" data-mode="whitelist">
           ✅ Whitelist
         </button>
-        <button class="chip mode-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-mode="ban">
+        <button class="chip mode-chip flex-1 bg-transparent border-none text-text-secondary py-1.5 px-2 rounded-full text-[11px] font-medium cursor-pointer transition-all text-center hover:text-white [&.active]:bg-white/10 [&.active]:text-white [&.active]:shadow-sm" data-mode="ban">
           ⛔ Ban
         </button>
       </div>
 
       <!-- Session Type Switcher -->
-      <div class="flex gap-2.5 mb-2.5">
-        <button class="chip type-chip active flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-type="standard">
+      <div class="flex p-1 gap-1 mb-3 bg-black/20 rounded-full border border-white/5 shadow-inner">
+        <button class="chip type-chip active flex-1 bg-transparent border-none text-text-secondary py-1.5 px-2 rounded-full text-[11px] font-medium cursor-pointer transition-all text-center hover:text-white [&.active]:bg-white/10 [&.active]:text-white [&.active]:shadow-sm" data-type="standard">
           ⏱ Standard
         </button>
-        <button class="chip type-chip flex-1 bg-white/5 border border-white/10 text-text-secondary py-2 px-1 rounded-full text-[11px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-type="pomodoro">
+        <button class="chip type-chip flex-1 bg-transparent border-none text-text-secondary py-1.5 px-2 rounded-full text-[11px] font-medium cursor-pointer transition-all text-center hover:text-white [&.active]:bg-white/10 [&.active]:text-white [&.active]:shadow-sm" data-type="pomodoro">
           🍅 Pomodoro
         </button>
       </div>
 
       <!-- Standard Section -->
       <div id="standardSection">
-        <div class="grid grid-cols-4 gap-2 mb-2.5">
-          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="30">30m</button>
-          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="60">1h</button>
-          <button class="chip dur-chip active bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="120">2h</button>
-          <button class="chip dur-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-min="240">4h</button>
+        <div class="grid grid-cols-4 gap-2 mb-3">
+          <button class="chip dur-chip bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-min="30">30m</button>
+          <button class="chip dur-chip bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-min="60">1h</button>
+          <button class="chip dur-chip active bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-min="120">2h</button>
+          <button class="chip dur-chip bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-min="240">4h</button>
         </div>
-        <div class="flex flex-col gap-1 mb-2">
-          <input type="number" id="customMin" placeholder="Custom Minutes" class="bg-black/20 border border-white/10 text-white p-1.5 rounded-[10px] text-[11px] w-full outline-none focus:border-white/30 transition-colors" />
+        <div class="flex flex-col gap-1 mb-3">
+          <input type="number" id="customMin" placeholder="Custom Minutes" class="bg-black/20 border border-white/10 text-white py-2 px-3 rounded-xl text-[11px] w-full outline-none focus:border-white/30 focus:bg-black/30 transition-all shadow-inner" />
         </div>
       </div>
 
       <!-- Pomodoro Section -->
       <div id="pomoSection" class="hidden">
-        <div class="grid grid-cols-3 gap-2 mb-2.5">
-          <button class="chip pomo-chip active bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="25" data-break="5">
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <button class="chip pomo-chip active bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-focus="25" data-break="5">
             25/5
           </button>
-          <button class="chip pomo-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="50" data-break="10">
+          <button class="chip pomo-chip bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-focus="50" data-break="10">
             50/10
           </button>
-          <button class="chip pomo-chip bg-white/5 border border-white/10 text-text-secondary py-1 px-1 rounded-full text-[10px] font-semibold cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-indigo-500/20 [&.active]:border-accent-blue [&.active]:text-white" data-focus="90" data-break="20">
+          <button class="chip pomo-chip bg-white/5 border border-white/5 text-text-secondary py-1.5 px-1 rounded-xl text-[11px] font-medium cursor-pointer transition-all text-center hover:bg-white/10 hover:text-white [&.active]:bg-accent-blue/20 [&.active]:border-accent-blue/50 [&.active]:text-white [&.active]:shadow-sm" data-focus="90" data-break="20">
             90/20
           </button>
         </div>
-        <div class="grid grid-cols-3 gap-2 mb-2.5">
-          <div class="flex flex-col gap-0.5">
-            <label for="pomoFocus" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Focus</label>
-            <input type="number" id="pomoFocus" value="25" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+        <div class="grid grid-cols-3 gap-2 mb-3 bg-black/10 p-2.5 rounded-[14px] border border-white/5">
+          <div class="flex flex-col gap-1">
+            <label for="pomoFocus" class="text-[9px] uppercase text-white/60 tracking-wider font-semibold text-center">Focus</label>
+            <input type="number" id="pomoFocus" value="25" class="bg-white/5 border border-white/10 text-white p-1.5 rounded-[8px] text-[11px] font-medium text-center w-full outline-none focus:border-white/30 focus:bg-white/10 transition-colors shadow-inner" />
           </div>
-          <div class="flex flex-col gap-0.5">
-            <label for="pomoBreak" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Break</label>
-            <input type="number" id="pomoBreak" value="5" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+          <div class="flex flex-col gap-1">
+            <label for="pomoBreak" class="text-[9px] uppercase text-white/60 tracking-wider font-semibold text-center">Break</label>
+            <input type="number" id="pomoBreak" value="5" class="bg-white/5 border border-white/10 text-white p-1.5 rounded-[8px] text-[11px] font-medium text-center w-full outline-none focus:border-white/30 focus:bg-white/10 transition-colors shadow-inner" />
           </div>
-          <div class="flex flex-col gap-0.5">
-            <label for="pomoCycles" class="text-[9px] uppercase text-white/80 tracking-wide font-extrabold text-center">Cycles</label>
-            <input type="number" id="pomoCycles" value="4" class="bg-black/20 border border-white/10 text-white p-1 rounded-[8px] text-[10px] text-center w-full outline-none focus:border-white/30 transition-colors" />
+          <div class="flex flex-col gap-1">
+            <label for="pomoCycles" class="text-[9px] uppercase text-white/60 tracking-wider font-semibold text-center">Cycles</label>
+            <input type="number" id="pomoCycles" value="4" class="bg-white/5 border border-white/10 text-white p-1.5 rounded-[8px] text-[11px] font-medium text-center w-full outline-none focus:border-white/30 focus:bg-white/10 transition-colors shadow-inner" />
           </div>
         </div>
       </div>
 
-      <div id="groupSection" class="group-section hidden mb-2 p-2.5 bg-white/5 border border-white/5 rounded-[14px]">
-        <div class="flex justify-between items-center mb-1.5">
-          <span class="text-[10px] font-extrabold text-text-muted uppercase tracking-wider">🛡️ Domain Groups</span>
-          <span class="text-[9px] font-extrabold text-accent-blue bg-indigo-500/10 px-1.5 py-0.5 rounded-full" id="groupCount">0 selected</span>
+      <div id="groupSection" class="group-section hidden mb-3 p-3 bg-white/5 border border-white/5 rounded-[16px]">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-[10px] font-extrabold text-white/70 uppercase tracking-wider">🛡️ Domain Groups</span>
+          <span class="text-[9px] font-bold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded-full" id="groupCount">0 selected</span>
         </div>
         <div class="flex flex-wrap gap-1.5 max-h-[80px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-sm" id="groupGrid">
           <!-- Groups populated by JS -->
@@ -109,10 +109,10 @@
       </div>
 
       <!-- Smart Session Templates -->
-      <div id="mbTemplatesSection" class="hidden mb-2 p-2.5 bg-white/5 border border-white/5 rounded-[14px]">
-        <div class="flex justify-between items-center mb-1.5">
-          <span class="text-[10px] font-extrabold text-text-muted uppercase tracking-wider">🧠 Smart Templates</span>
-          <span class="text-[9px] font-extrabold text-accent-blue bg-indigo-500/10 px-1.5 py-0.5 rounded-full" id="mbTemplatesCount">0 saved</span>
+      <div id="mbTemplatesSection" class="hidden mb-3 p-3 bg-white/5 border border-white/5 rounded-[16px]">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-[10px] font-extrabold text-white/70 uppercase tracking-wider">🧠 Smart Templates</span>
+          <span class="text-[9px] font-bold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded-full" id="mbTemplatesCount">0 saved</span>
         </div>
         <div class="flex flex-wrap gap-1.5 max-h-[80px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-sm" id="mbTemplatesList">
           <!-- Templates populated by JS -->
@@ -120,19 +120,21 @@
       </div>
 
       <!-- Rescue Section -->
-      <div class="bg-red-500/5 border border-red-500/10 rounded-[18px] p-3 mb-1">
-        <div class="flex justify-between items-center mb-1.5">
-          <span class="text-xs font-extrabold text-red-400">🛡️ Rescue Throne</span>
-          <select id="rescueDur" class="bg-transparent border-none text-white text-[10px] outline-none appearance-none cursor-pointer">
+      <div class="bg-red-500/5 border border-red-500/15 shadow-[0_4px_20px_rgba(239,68,68,0.05)] rounded-[20px] p-4 mb-2 backdrop-blur-md">
+        <div class="flex justify-between items-center mb-2.5">
+          <span class="text-[13px] font-extrabold text-red-400">🛡️ Rescue Throne</span>
+          <select id="rescueDur" class="bg-red-500/10 border border-red-500/20 text-red-200 text-[11px] font-medium py-1 px-2 rounded-lg outline-none cursor-pointer hover:bg-red-500/20 transition-colors">
             <option value="5">5m</option>
             <option value="10" selected>10m</option>
             <option value="30">30m</option>
           </select>
         </div>
-        <button class="w-full p-2 bg-red-500/10 text-white border border-red-500/20 rounded-full text-[11px] font-semibold cursor-pointer transition-all hover:bg-red-500/20 hover:border-red-500" id="mbBtnRescue">Activate Rescue</button>
+        <button class="w-full p-2.5 bg-red-500/10 text-red-300 border border-red-500/30 rounded-xl text-[12px] font-bold cursor-pointer transition-all hover:bg-red-500/20 hover:border-red-500 hover:text-white" id="mbBtnRescue">Activate Rescue</button>
       </div>
 
-      <button class="bg-[linear-gradient(135deg,var(--color-accent-blue),var(--color-accent-violet))] text-white border-none p-3 rounded-full font-bold text-[13px] cursor-pointer mt-auto transition-transform hover:-translate-y-0.5 hover:scale-[1.02] active:translate-y-px active:scale-[0.98]" id="mbBtnStart">Start Session</button>
+      <div class="fixed bottom-5 left-5 right-5 z-50">
+        <button class="w-full bg-[linear-gradient(135deg,var(--color-accent-blue),var(--color-accent-violet))] text-white border border-white/10 shadow-[0_4px_16px_rgba(99,102,241,0.25)] p-3.5 rounded-[18px] font-bold text-[14px] cursor-pointer transition-all hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-[0_6px_20px_rgba(99,102,241,0.4)] active:translate-y-px active:scale-[0.98]" id="mbBtnStart">Start Session</button>
+      </div>
     </div>
 
     <!-- BLOCK DETAILS STATE -->
@@ -220,23 +222,25 @@
         <div id="activeIntentTasks" class="mt-2 text-left text-[11px] text-white"></div>
       </div>
 
-      <div class="w-full grid grid-cols-2 gap-2 mt-2">
-        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
-          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Mode</span>
-          <span class="text-xs font-extrabold text-white" id="mbInfoMode">—</span>
+      <div class="w-full grid grid-cols-2 gap-2 mt-3">
+        <div class="bg-white/5 border border-white/5 p-3 rounded-[16px] flex flex-col gap-1 shadow-sm backdrop-blur-md">
+          <span class="text-[10px] uppercase text-white/50 tracking-[0.8px] font-bold">Mode</span>
+          <span class="text-[13px] font-extrabold text-white" id="mbInfoMode">—</span>
         </div>
-        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
-          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Type</span>
-          <span class="text-xs font-extrabold text-white" id="mbInfoType">—</span>
+        <div class="bg-white/5 border border-white/5 p-3 rounded-[16px] flex flex-col gap-1 shadow-sm backdrop-blur-md">
+          <span class="text-[10px] uppercase text-white/50 tracking-[0.8px] font-bold">Type</span>
+          <span class="text-[13px] font-extrabold text-white" id="mbInfoType">—</span>
         </div>
-        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5">
-          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Expires</span>
-          <span class="text-xs font-extrabold text-white" id="mbInfoExpires">—</span>
+        <div class="bg-white/5 border border-white/5 p-3 rounded-[16px] flex flex-col gap-1 shadow-sm backdrop-blur-md">
+          <span class="text-[10px] uppercase text-white/50 tracking-[0.8px] font-bold">Expires</span>
+          <span class="text-[13px] font-extrabold text-white" id="mbInfoExpires">—</span>
         </div>
-        <div class="bg-white/5 border border-white/10 p-2.5 rounded-[16px] flex flex-col gap-0.5" id="mbNextRow">
-          <span class="text-[10px] uppercase text-white/70 tracking-[0.6px] font-extrabold">Next Phase</span>
-          <span class="text-xs font-extrabold text-white" id="mbInfoNext">—</span>
-          <span id="mbInfoNextTime" class="text-[10px] opacity-70 font-extrabold mt-0.5 tabular-nums">--:--</span>
+        <div class="bg-white/5 border border-white/5 p-3 rounded-[16px] flex flex-col gap-1 shadow-sm backdrop-blur-md" id="mbNextRow">
+          <span class="text-[10px] uppercase text-white/50 tracking-[0.8px] font-bold">Next Phase</span>
+          <span class="text-[13px] font-extrabold text-white flex items-center justify-between" id="mbInfoNext">
+            —
+            <span id="mbInfoNextTime" class="text-[10px] opacity-60 font-bold tabular-nums">--:--</span>
+          </span>
         </div>
       </div>
 
