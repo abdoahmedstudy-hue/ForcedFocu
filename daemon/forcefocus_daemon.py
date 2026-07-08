@@ -591,14 +591,6 @@ class ForcedFocusDaemon:
             logging.error("Failed to persist session.lock: %s", exc)
     def _validate_settings(self, settings_dict: dict) -> tuple[bool, str, dict]:
         return self.settings_manager.validate_settings(settings_dict)
-    @staticmethod
-    def _looks_like_mp3(audio_data: bytes) -> bool:
-        """Accept ID3-tagged MP3s or raw MPEG audio frames."""
-        if len(audio_data) < 4:
-            return False
-        if audio_data.startswith(b"ID3"):
-            return True
-        return audio_data[0] == 0xFF and (audio_data[1] & 0xE0) == 0xE0
     # ── Passphrase ────────────────────────────────────────────────────────────
     def _verify_passphrase(self, passphrase: str) -> bool:
         if not self._cached_ks_hash:

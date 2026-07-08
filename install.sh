@@ -140,9 +140,22 @@ chmod 755 "$CLI_DST"
 chown root:wheel "$CLI_DST"
 
 # Clear existing directory to prevent duplicate nesting or stale files
+# Backup user sounds before clearing
+TEMP_SOUNDS_DIR=$(mktemp -d)
+if [[ -d "$WEB_DIR_DST/assets/sounds" ]]; then
+    cp -R "$WEB_DIR_DST/assets/sounds" "$TEMP_SOUNDS_DIR/"
+fi
+
 rm -rf "$WEB_DIR_DST"
 mkdir -p "$WEB_DIR_DST"
 cp -R "$WEB_DIR_SRC/"* "$WEB_DIR_DST/"
+
+# Restore user sounds
+if [[ -d "$TEMP_SOUNDS_DIR/sounds" ]]; then
+    mkdir -p "$WEB_DIR_DST/assets/sounds"
+    cp -R "$TEMP_SOUNDS_DIR/sounds/"* "$WEB_DIR_DST/assets/sounds/" 2>/dev/null || true
+fi
+rm -rf "$TEMP_SOUNDS_DIR"
 
 chmod -R 755 "$WEB_DIR_DST"
 

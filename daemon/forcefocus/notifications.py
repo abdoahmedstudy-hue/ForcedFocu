@@ -176,3 +176,12 @@ class NotificationsManager:
         except Exception as exc:
             logging.error("Upload error: %s", exc)
             return {"status": "error", "message": f"Upload failed: {str(exc)}"}
+
+    @staticmethod
+    def _looks_like_mp3(audio_data: bytes) -> bool:
+        """Accept ID3-tagged MP3s or raw MPEG audio frames."""
+        if len(audio_data) < 4:
+            return False
+        if audio_data.startswith(b"ID3"):
+            return True
+        return audio_data[0] == 0xFF and (audio_data[1] & 0xE0) == 0xE0

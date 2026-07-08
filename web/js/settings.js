@@ -34,12 +34,16 @@ const els = {
   tabContents: document.querySelectorAll(".tab-content"),
   dropZone: $("#dropZone"),
   domainError: $("#domainError"),
+  btnToggleSoundMapping: $("#btnToggleSoundMapping"),
+  iconToggleSoundMapping: $("#iconToggleSoundMapping"),
+  soundMappingContent: $("#soundMappingContent"),
 };
 
 let settings = {};
 let availableSounds = [];
 let availableGroups = {};
 let previewAudio = null;
+let currentPreviewBtn = null;
 
 let eventSource = null;
 let sseReconnectTimer = null;
@@ -48,14 +52,43 @@ let _lastNextPrayerSeconds = null;
 
 const showToast = (msg) => sharedShowToast(els.toast, msg);
 
-function playPreview(filename) {
+function playPreview(filename, btnElement = null) {
   if (previewAudio) {
     previewAudio.pause();
     previewAudio = null;
   }
+
+  if (currentPreviewBtn) {
+    currentPreviewBtn.textContent = "▶";
+    const wasSameBtn = (currentPreviewBtn === btnElement);
+    currentPreviewBtn = null;
+    if (wasSameBtn) {
+      return;
+    }
+  }
+
   if (!filename) return;
+  
   previewAudio = new Audio("/assets/sounds/" + encodeURIComponent(filename));
-  previewAudio.play().catch((e) => console.error("Preview error:", e));
+  
+  if (btnElement) {
+    currentPreviewBtn = btnElement;
+    btnElement.textContent = "⏹";
+    previewAudio.addEventListener("ended", () => {
+      if (currentPreviewBtn === btnElement) {
+        btnElement.textContent = "▶";
+        currentPreviewBtn = null;
+      }
+    });
+  }
+
+  previewAudio.play().catch((e) => {
+    console.error("Preview error:", e);
+    if (currentPreviewBtn === btnElement && btnElement) {
+      btnElement.textContent = "▶";
+      currentPreviewBtn = null;
+    }
+  });
 }
 
 async function handleFileUpload(e) {
@@ -390,7 +423,7 @@ async function init() {
     const btn = e.target.closest(".btn-icon");
     if (!btn) return;
     const sound = btn.dataset.sound;
-    if (btn.classList.contains("play-sound")) playPreview(sound);
+    if (btn.classList.contains("play-sound")) playPreview(sound, btn);
     if (btn.classList.contains("delete-sound")) deleteSound(sound, btn);
   });
 
@@ -398,6 +431,13 @@ async function init() {
     els.btnToggleLibrary.classList.toggle("open");
     els.libraryContent.classList.toggle("hidden");
   });
+
+  if (els.btnToggleSoundMapping) {
+    els.btnToggleSoundMapping.addEventListener("click", () => {
+      els.soundMappingContent.classList.toggle("hidden");
+      els.iconToggleSoundMapping.classList.toggle("rotate-180");
+    });
+  }
 
   // Groups Listeners
   els.btnNewGroup.addEventListener("click", () => openGroupModal());
