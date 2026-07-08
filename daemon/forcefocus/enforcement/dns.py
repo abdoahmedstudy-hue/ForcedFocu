@@ -35,7 +35,11 @@ class DNSMixin:
                             self._perma_hosts_stat = (st.st_mtime, st.st_size)
                         except Exception:
                             self._perma_hosts_stat = None
-                        if self.daemon.state.session.active:
+                        is_break = self.daemon.state.session.session_type == "pomodoro" and (
+                            self.daemon.state.pomodoro.pomo_phase == "break" or 
+                            (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+                        )
+                        if self.daemon.state.session.active and not is_break:
                             self._enforce_firewall(True, upstream_dns=self.daemon.dns_proxy.upstream_dns if self.daemon.dns_proxy else None)
                         else:
                             self._enforce_firewall(False)

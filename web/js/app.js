@@ -26,6 +26,7 @@ let pomoCycles = 4;
 
 let scheduleType = "in"; // 'now', 'in', 'at'
 let availableGroups = {};
+let availableLists = { blacklist: [], whitelist: [] };
 let selectedGroups = new Set();
 let apiToken = ""; // Per-launch API token for mutation auth
 let lastActiveState = false;
@@ -1446,6 +1447,7 @@ async function refreshLists() {
   if (data.status !== "ok") return;
 
   const lists = data.lists;
+  availableLists = lists;
   renderDomainList(els.blacklistDomains, lists.blacklist || [], "blacklist");
   renderDomainList(els.whitelistDomains, lists.whitelist || [], "whitelist");
   els.blacklistCount.textContent = (lists.blacklist || []).length;
@@ -1634,7 +1636,7 @@ async function addPermaBlock() {
 
     for (const line of lines) {
       const domain = extractDomain(line);
-      if (/^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,}$/.test(domain)) {
+      if (domain) {
         domains.push(domain);
       } else {
         invalid.push(line);
@@ -1788,12 +1790,19 @@ function computeBlockDetails() {
   // Compute expiry based on schedule type
   let expiryText;
   if (activeStartFlow === "at") {
-    const atVal = els.scheduleAt?.dataset?.value;
-    expiryText = atVal ? `Scheduled: ${els.scheduleAt.value}` : "—";
+    const atVal = els.scheduleAt?.dataset?.value || els.scheduleAt?.value;
+    if (atVal) {
+      const startDate = new Date(atVal);
+      const expiryDate = new Date(startDate.getTime() + totalMinutes * 60000);
+      expiryText = formatExpiryTime(expiryDate) + ` (Starts ${formatExpiryTime(startDate)})`;
+    } else {
+      expiryText = "—";
+    }
   } else if (activeStartFlow === "in") {
     const inMin = parseInt(els.scheduleIn?.value, 10) || 0;
     const futureDate = new Date(Date.now() + (inMin + totalMinutes) * 60000);
-    expiryText = formatExpiryTime(futureDate);
+    const startDate = new Date(Date.now() + inMin * 60000);
+    expiryText = formatExpiryTime(futureDate) + ` (Starts ${formatExpiryTime(startDate)})`;
   } else {
     const expiryDate = new Date(Date.now() + totalMinutes * 60000);
     expiryText = formatExpiryTime(expiryDate);
@@ -1803,24 +1812,34 @@ function computeBlockDetails() {
   let domainCount = "—";
   let groupText = "—";
   try {
-    const groupNames = selectedGroups.size > 0
-      ? Array.from(selectedGroups)
-      : Object.keys(availableGroups);
-      
-    if (selectedGroups.size === 0 && Object.keys(availableGroups).length > 0) {
-      groupText = "All Groups";
-    } else if (groupNames.length > 0) {
-      groupText = groupNames.join(", ");
-    }
-    
-    const uniqueDomains = new Set();
-    for (const name of groupNames) {
-      const domains = availableGroups[name];
-      if (Array.isArray(domains)) {
-        domains.forEach((d) => uniqueDomains.add(d));
+    if (currentMode === "ban") {
+      groupText = "N/A (Full Ban)";
+      domainCount = "All Network Traffic";
+    } else {
+      const groupNames = Array.from(selectedGroups);
+        
+      if (groupNames.length > 0) {
+        groupText = groupNames.join(", ");
+      } else {
+        groupText = "—";
       }
+      
+      const uniqueDomains = new Set();
+      for (const name of groupNames) {
+        const domains = availableGroups[name];
+        if (Array.isArray(domains)) {
+          domains.forEach((d) => uniqueDomains.add(d));
+        }
+      }
+      
+      if (currentMode === "blacklist" && availableLists.blacklist) {
+        availableLists.blacklist.forEach((d) => uniqueDomains.add(d));
+      } else if (currentMode === "whitelist" && availableLists.whitelist) {
+        availableLists.whitelist.forEach((d) => uniqueDomains.add(d));
+      }
+      
+      domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
     }
-    domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
   } catch {
     domainCount = "—";
     groupText = "—";
@@ -2438,6 +2457,20 @@ function initEvents() {
     if (e.target === els.stopModal) els.stopModal.classList.add("hidden");
   });
 
+  const formatListInput = (e) => {
+    const val = e.target.value;
+    if (!val.trim()) return;
+    const cleanedDomains = val
+      .split(/[\n, ]+/)
+      .map((d) => extractDomain(d))
+      .filter((d) => d.length > 0);
+    e.target.value = cleanedDomains.join("\n");
+  };
+
+  els.blacklistInput.addEventListener("blur", formatListInput);
+  els.whitelistInput.addEventListener("blur", formatListInput);
+  els.permaBlockInput.addEventListener("blur", formatListInput);
+
   // Add domain: blacklist
   $("#btnAddBlacklist").addEventListener("click", () => addDomain("blacklist"));
   els.blacklistInput.addEventListener("keydown", (e) => {
@@ -2558,8 +2591,7 @@ async function addDomain(listName) {
 
     for (const line of lines) {
       const domain = extractDomain(line);
-      // Basic validation
-      if (/^[a-z0-9]([a-z0-9\-]*\.)+[a-z]{2,}$/.test(domain)) {
+      if (domain) {
         domains.push(domain);
       } else {
         invalid.push(line);

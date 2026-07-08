@@ -21,14 +21,38 @@ export function formatTime(totalSeconds) {
 
 export function extractDomain(input) {
   let d = input.trim().toLowerCase();
-  // Strip protocol
-  d = d.replace(/^https?:\/\//, "");
-  // Strip path, query, hash
-  d = d.split("/")[0].split("?")[0].split("#")[0];
+  if (!d) return "";
+
+  try {
+    if (d.includes("://")) {
+      const url = new URL(d);
+      d = url.hostname || url.pathname;
+    } else {
+      d = d.split("/")[0].split("?")[0].split("#")[0];
+    }
+  } catch (e) {
+    d = d.split("/")[0].split("?")[0].split("#")[0];
+  }
+
   // Strip port
   d = d.split(":")[0];
-  // Strip wildcard characters (e.g., *.example.com → example.com, example.com* → example.com)
+
+  // Strip www.
+  if (d.startsWith("www.")) {
+    d = d.substring(4);
+  }
+
+  // Strip wildcard characters
   d = d.replace(/^\*\.?/, "").replace(/\*$/, "");
+
+  // Strict backend validation match
+  if (d.length > 253) return "";
+  if (/[\n\r\t \\/]/.test(d)) return "";
+  if (!d.includes(".")) return "";
+  if (d.startsWith(".") || d.startsWith("-") || d.endsWith(".") || d.endsWith("-")) return "";
+  if (!/^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$/.test(d)) return "";
+  if (d.includes("..")) return "";
+
   return d;
 }
 

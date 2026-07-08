@@ -53,6 +53,7 @@ DEFAULT_SETTINGS = {
     "sound_end": "Session End .mp3",
     "sound_scheduled": "Scheduled meeting.mp3",
     "sound_blocked": "Blocked site open.mp3",
+    "sound_prayer": "",
     "intent_notification_enabled": True,
     "intent_notification_interval": 15,
     "daily_focus_goal_hours": 0,

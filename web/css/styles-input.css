@@ -3659,22 +3659,50 @@ textarea:focus-visible,
 
 .block-details-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin: 20px 0;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin: 24px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .detail-card {
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
 .detail-card:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 2px 10px rgba(255, 255, 255, 0.02);
+}
+
+.detail-card:hover::before {
+  opacity: 1;
 }
 
 .detail-card-full {
@@ -3682,18 +3710,31 @@ textarea:focus-visible,
 }
 
 .detail-card-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 6px;
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .detail-card-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.detail-card-value[id="wdDetailType"] {
+  color: var(--color-accent-blue);
+}
+
+.detail-card-value[id="wdDetailSession"] {
+  color: var(--color-accent-violet);
 }
 
 .block-details-error {
@@ -4497,6 +4538,26 @@ textarea:focus-visible,
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
 }
+#prayerCountdownCard {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0px;
+}
+
+#prayerCountdownCard::before {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -100px;
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(73, 114, 178, 0.15) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
 
 #prayerCountdownCard:hover {
   border-color: var(--border-active);
@@ -4510,51 +4571,50 @@ textarea:focus-visible,
   gap: 16px;
   position: relative;
   z-index: 2;
-}
-
-.prayer-icon-wrapper {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
+  margin-bottom: 24px;
 }
 
 .prayer-title-group {
   flex: 1;
 }
 
+.prayer-name {
+  font-size: 1.75rem !important;
+  font-weight: 800 !important;
+  color: #fff !important;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
 .prayer-status-badge {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  padding: 6px 12px;
+  background: rgba(73, 114, 178, 0.1);
+  border: 1px solid rgba(73, 114, 178, 0.2);
+  padding: 6px 14px;
   border-radius: 99px;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--accent-blue);
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #8bb0ed;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  backdrop-filter: blur(8px);
 }
 
 .prayer-status-badge.banned {
   background: rgba(244, 63, 94, 0.15);
   border-color: rgba(244, 63, 94, 0.3);
-  color: var(--danger);
+  color: #f43f5e;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 0 8px currentColor;
 }
 
 .status-dot.pulsing {
@@ -4564,100 +4624,115 @@ textarea:focus-visible,
 .prayer-countdown-container {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   position: relative;
   z-index: 2;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: inset 0 2px 20px rgba(0,0,0,0.3);
 }
 
 .prayer-countdown-value {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 3rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
+  font-size: 3.5rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+  background-image: linear-gradient(180deg, #ffffff 0%, rgba(255,255,255,0.6) 100%);
   line-height: 1;
-  text-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
+  text-shadow: 0 10px 30px rgba(0,0,0,0.5);
   font-variant-numeric: tabular-nums;
 }
 
 .prayer-countdown-value.banned {
-  color: var(--danger);
-  text-shadow: 0 4px 20px var(--danger-glow);
+  background-image: linear-gradient(180deg, #f43f5e 0%, rgba(244,63,94,0.6) 100%);
+  text-shadow: 0 10px 30px rgba(244,63,94,0.2);
 }
 
 .prayer-countdown-label {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  font-weight: 500;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
 }
 
 .prayer-action-container {
-  margin-top: 12px;
+  margin-top: 16px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-  gap: 16px;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 24px;
+  gap: 12px;
   position: relative;
   z-index: 2;
+  transition: all 0.3s ease;
 }
 
 .prayer-skip-hint {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  line-height: 1.5;
+  font-size: 0.75rem;
+  color: rgba(252, 165, 165, 0.8);
+  font-weight: 500;
+  text-align: center;
   margin: 0;
-  flex: 1;
-  opacity: 0.8;
 }
 
 .btn-skip-prayer {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  padding: 8px 18px;
-  border-radius: var(--radius-sm);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  display: inline-flex;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  width: 100%;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.05);
 }
 
 .btn-skip-prayer:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  transform: scale(1.02);
+  color: #fca5a5;
 }
 
 .btn-skip-prayer:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .btn-skip-prayer .btn-icon {
-  font-size: 1.1em;
+  font-size: 1.2em;
 }
 
 /* ── Prayer Timeline Widget (Luxury Minimal) ── */
 .prayer-timeline {
   display: flex;
   justify-content: space-between;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   position: relative;
   z-index: 2;
+  width: 100%;
 }
 
 .prayer-timeline-item {
@@ -4671,27 +4746,27 @@ textarea:focus-visible,
 .prayer-timeline-item:not(:last-child)::after {
   content: '';
   position: absolute;
-  top: 6px;
+  top: 5px;
   left: 50%;
   width: 100%;
   height: 2px;
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.05);
   z-index: 0;
 }
 
 .prayer-timeline-dot {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--bg-card);
-  border: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid #0a0a1a;
   position: relative;
   z-index: 1;
-  transition: var(--transition);
+  transition: all 0.3s ease;
 }
 
 .prayer-timeline-content {
-  margin-top: 8px;
+  margin-top: 10px;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -4699,69 +4774,64 @@ textarea:focus-visible,
 }
 
 .prayer-timeline-name {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  transition: var(--transition);
+  transition: all 0.3s ease;
 }
 
 .prayer-timeline-time {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: var(--text-tertiary);
-  transition: var(--transition);
+  color: rgba(255, 255, 255, 0.3);
+  font-weight: 500;
+  transition: all 0.3s ease;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Past Prayers */
 .prayer-timeline-item.past .prayer-timeline-dot {
-  background: var(--border);
-  border-color: var(--border);
+  background: rgba(73, 114, 178, 0.5);
 }
 .prayer-timeline-item.past:not(:last-child)::after {
-  background: var(--border-active);
+  background: rgba(73, 114, 178, 0.2);
 }
-.prayer-timeline-item.past .prayer-timeline-name,
+.prayer-timeline-item.past .prayer-timeline-name {
+  color: rgba(73, 114, 178, 0.6);
+}
 .prayer-timeline-item.past .prayer-timeline-time {
-  opacity: 0.5;
+  color: rgba(73, 114, 178, 0.4);
 }
 
 /* Current / Next Prayer */
 .prayer-timeline-item.current .prayer-timeline-dot {
-  background: var(--accent-blue);
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
-  transform: scale(1.2);
+  background: #4972B2;
+  border-color: #0a0a1a;
+  box-shadow: 0 0 12px rgba(73, 114, 178, 0.8);
+  transform: scale(1.3);
 }
 .prayer-timeline-item.current .prayer-timeline-name {
-  color: var(--accent-blue);
+  color: #4972B2;
+  font-weight: 800;
 }
 .prayer-timeline-item.current .prayer-timeline-time {
-  color: var(--text-primary);
-  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
 }
+
 .prayer-timeline-item.skipped .prayer-timeline-dot {
-  background: #ef4444 !important;
-  border-color: #ef4444 !important;
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
 }
 .prayer-timeline-item.skipped .prayer-timeline-name {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.3);
   text-decoration: line-through;
 }
-.prayer-timeline-item.skipped .prayer-timeline-name::after {
-  content: " (Skipped)";
-  color: #ef4444;
-  text-decoration: none;
-  display: inline-block;
-  margin-left: 6px;
-  font-weight: 600;
-}
 .prayer-timeline-item.skipped .prayer-timeline-time {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.2);
 }
 .prayer-timeline-item.skipped:not(:last-child)::after {
-  background: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.2);
 }
 

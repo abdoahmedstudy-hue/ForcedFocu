@@ -40,7 +40,23 @@ def cmd_set_key(_args):
             with open(temp_path, "w") as f:
                 json.dump(data, f)
             os.chmod(temp_path, 0o600)
+            
+            # Remove any existing immutable flag before replacing
+            if KS_HASH_FILE.exists():
+                try:
+                    import subprocess
+                    subprocess.run(["chflags", "nouchg", str(KS_HASH_FILE)], capture_output=True)
+                except Exception:
+                    pass
+                    
             os.replace(temp_path, KS_HASH_FILE)
+            
+            # Make the new ks_hash immutable to prevent unauthorized modification
+            try:
+                import subprocess
+                subprocess.run(["chflags", "uchg", str(KS_HASH_FILE)], capture_output=True)
+            except Exception:
+                pass
         except Exception:
             if os.path.exists(temp_path):
                 try:

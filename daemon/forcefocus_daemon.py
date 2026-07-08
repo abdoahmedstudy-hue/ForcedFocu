@@ -139,6 +139,8 @@ class ForcedFocusDaemon:
         self._ip_resolution_running = False
         self._net_services_cache: list[str] = []
         self._net_services_cache_time: float = 0.0
+        self._cached_ks_hash = None
+        self._cached_ks_hash_mtime: float = 0.0
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     def run(self):
         setup_logging()
@@ -148,6 +150,7 @@ class ForcedFocusDaemon:
         self._ensure_groups_file()
         self._ensure_perma_blocklist_file()
         self._ensure_templates_file()
+        self._load_ks_hash_cache()
         self._generate_api_token()
         self._install_signal_handlers()
         self._recover_stale_hosts_lock()
@@ -190,6 +193,14 @@ class ForcedFocusDaemon:
         if not TEMPLATES_FILE.exists():
             TEMPLATES_FILE.write_text(json.dumps({"templates": []}, indent=2))
             os.chmod(str(TEMPLATES_FILE), 0o644)
+    def _load_ks_hash_cache(self):
+        try:
+            if KS_HASH_FILE.exists():
+                self._cached_ks_hash = json.loads(KS_HASH_FILE.read_text())
+                self._cached_ks_hash_mtime = KS_HASH_FILE.stat().st_mtime
+        except Exception as exc:
+            logging.error("Failed to load ks_hash into cache: %s", exc)
+
     def _generate_api_token(self):
         """Generate a per-launch API token for HTTP mutation endpoint auth."""
         import secrets
@@ -251,6 +262,7 @@ class ForcedFocusDaemon:
         try:
             temp_path.write_text(json.dumps(data, indent=indent))
             os.replace(temp_path, path)
+            return path.stat().st_mtime
         except Exception as exc:
             logging.error("Atomic write failed for %s: %s", path, exc)
             if temp_path.exists():
@@ -588,15 +600,13 @@ class ForcedFocusDaemon:
             return True
         return audio_data[0] == 0xFF and (audio_data[1] & 0xE0) == 0xE0
     # ── Passphrase ────────────────────────────────────────────────────────────
-    @staticmethod
-    def _verify_passphrase(passphrase: str) -> bool:
-        if not KS_HASH_FILE.exists():
+    def _verify_passphrase(self, passphrase: str) -> bool:
+        if not self._cached_ks_hash:
             return False
         try:
-            stored = json.loads(KS_HASH_FILE.read_text())
-            salt = bytes.fromhex(stored["salt"])
-            expected = stored["hash"]
-        except (json.JSONDecodeError, KeyError, ValueError):
+            salt = bytes.fromhex(self._cached_ks_hash["salt"])
+            expected = self._cached_ks_hash["hash"]
+        except (KeyError, ValueError):
             return False
         computed = hashlib.pbkdf2_hmac(
             "sha256", passphrase.encode("utf-8"), salt, 100_000

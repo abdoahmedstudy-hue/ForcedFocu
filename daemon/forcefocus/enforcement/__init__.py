@@ -36,7 +36,14 @@ class EnforcementManager(DNSMixin, FirewallMixin, SystemMixin):
                     self.daemon.dns_proxy = None
                 if hasattr(self.daemon, "_stop_sni_proxy"):
                     self.daemon._stop_sni_proxy()
-                self._restore_dns()
+            else:
+                # Blacklist mode: briefly toggle DNS to localhost to trigger macOS SCNetworkReachability
+                # This forces browsers (Chrome/Safari) to instantly flush their internal DNS caches,
+                # resolving the "ERR_CONNECTION_REFUSED" cache bug on break transition.
+                self._set_dns_to_localhost()
+
+            self._restore_dns()
+            self._clear_browser_caches()
             if self.daemon.perma_blocklist:
                 self._enforce_firewall(True)
             else:

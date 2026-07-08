@@ -106,6 +106,7 @@ function renderSettings() {
     sound_end: "Session End",
     sound_scheduled: "Scheduled Session",
     sound_blocked: "Blocked Site Access",
+    sound_prayer: "Prayer Time",
   };
 
   // R7: Use escapeHtml on all user-controlled data
@@ -415,27 +416,22 @@ async function init() {
   });
   
   if (els.groupDomainsInput) {
-    els.groupDomainsInput.addEventListener("input", (e) => {
+    const formatInput = (e) => {
       const val = e.target.value;
-      const domains = val.split(/[\n, ]+/).map(d => d.trim()).filter(d => d.length > 0);
-      
-      let hasError = false;
-      const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\.[a-zA-Z]{2,})+$/;
-      
-      for (const d of domains) {
-        if (!domainRegex.test(d)) {
-          hasError = true;
-          break;
-        }
-      }
-      
-      if (hasError && domains.length > 0) {
-        els.domainError.textContent = "Invalid domain format (e.g. example.com).";
-        els.domainError.classList.remove("hidden");
-        els.btnSaveGroup.disabled = true;
-        els.btnSaveGroup.classList.add("opacity-50", "cursor-not-allowed");
-      } else {
-        els.domainError.classList.add("hidden");
+      if (!val.trim()) return;
+      const cleanedDomains = val
+        .split(/[\n, ]+/)
+        .map(d => extractDomain(d))
+        .filter(d => d.length > 0);
+      e.target.value = cleanedDomains.join("\n");
+    };
+    
+    els.groupDomainsInput.addEventListener("blur", formatInput);
+    
+    // Clear any previous error states immediately on input
+    els.groupDomainsInput.addEventListener("input", () => {
+      if (els.domainError) els.domainError.classList.add("hidden");
+      if (els.btnSaveGroup) {
         els.btnSaveGroup.disabled = false;
         els.btnSaveGroup.classList.remove("opacity-50", "cursor-not-allowed");
       }

@@ -36,7 +36,9 @@ class DomainsManager:
                 return {"blacklist": [], "whitelist": []}
 
     def save_lists(self, lists: dict):
-        self.daemon._atomic_write_json(LISTS_FILE, lists, indent=2)
+        new_mtime = self.daemon._atomic_write_json(LISTS_FILE, lists, indent=2)
+        if new_mtime:
+            self.daemon._cached_lists_mtime = new_mtime
         self.daemon.notifications_manager.broadcast_state_changed()
 
     def load_groups(self) -> dict:
@@ -306,7 +308,9 @@ class DomainsManager:
             }
         data = {"domains": self.daemon.perma_blocklist, "pending_unlocks": pending}
         try:
-            self.daemon._atomic_write_json(PERMA_BLOCK_FILE, data, indent=2)
+            new_mtime = self.daemon._atomic_write_json(PERMA_BLOCK_FILE, data, indent=2)
+            if new_mtime:
+                self.daemon._cached_perma_mtime = new_mtime
         except Exception as exc:
             logging.error("Failed to save permanent blocklist: %s", exc)
 

@@ -9,6 +9,7 @@ let animationFrameId = null;
 let apiToken = "";
 let selectedGroups = [];
 let availableGroups = {};
+let availableLists = { blacklist: [], whitelist: [] };
 let sessionTemplates = [];
 let isPopoverVisible = false;
 let unlockRemainingSeconds = 0;
@@ -360,7 +361,8 @@ function renderStatus(data) {
     }
   } else {
     // We are idle
-    if (!isIntentVisible) {
+    const isBlockDetailsVisible = els.blockDetailsState && !els.blockDetailsState.classList.contains("hidden");
+    if (!isIntentVisible && !isBlockDetailsVisible) {
       els.idleState.classList.remove("hidden");
       els.activeState.classList.add("hidden");
       els.intentState.classList.add("hidden");
@@ -542,8 +544,12 @@ async function fetchGroups() {
       availableGroups = res.groups;
       renderGroups();
     }
+    const resLists = await api("GET", "/api/lists");
+    if (resLists.lists) {
+      availableLists = resLists.lists;
+    }
   } catch (e) {
-    console.error("Failed to fetch groups:", e);
+    console.error("Failed to fetch groups or lists:", e);
   }
 }
 
@@ -680,14 +686,12 @@ function initEvents() {
     let groupText = "—";
     try {
       const uniqueDomains = new Set();
-      const groupNames = selectedGroups.size > 0
-        ? Array.from(selectedGroups)
-        : Object.keys(availableGroups);
+      const groupNames = Array.from(selectedGroups);
         
-      if (selectedGroups.size === 0 && Object.keys(availableGroups).length > 0) {
-        groupText = "All Groups";
-      } else if (groupNames.length > 0) {
+      if (groupNames.length > 0) {
         groupText = groupNames.join(", ");
+      } else {
+        groupText = "—";
       }
 
       for (const name of groupNames) {
@@ -696,6 +700,13 @@ function initEvents() {
           domains.forEach((d) => uniqueDomains.add(d));
         }
       }
+      
+      if (currentMode === "blacklist" && availableLists.blacklist) {
+        availableLists.blacklist.forEach((d) => uniqueDomains.add(d));
+      } else if (currentMode === "whitelist" && availableLists.whitelist) {
+        availableLists.whitelist.forEach((d) => uniqueDomains.add(d));
+      }
+      
       domainCount = uniqueDomains.size > 0 ? `${uniqueDomains.size} domains` : "—";
     } catch {
       domainCount = "—";

@@ -1,3 +1,4 @@
+import base64
 import queue
 import logging
 import threading

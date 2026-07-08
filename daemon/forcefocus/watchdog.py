@@ -128,6 +128,7 @@ class WatchdogManager:
             self._check_reenforce_signal()
             self._check_ip_resolution()
             self._check_perma_blocklist(get_continuous_time())
+            self._check_config_integrity()
 
             if not self.daemon.state.session.active:
                 return
@@ -140,7 +141,10 @@ class WatchdogManager:
             if self._check_pomodoro_transitions(now_mono): return
 
             # Skip tampering checks during break
-            if self.daemon.state.session.session_type == "pomodoro" and self.daemon.state.pomodoro.pomo_phase == "break":
+            if self.daemon.state.session.session_type == "pomodoro" and (
+                self.daemon.state.pomodoro.pomo_phase == "break" or 
+                (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+            ):
                 return
 
             self._check_hosts_tamper()
@@ -157,7 +161,7 @@ class WatchdogManager:
             if current_prayer != p_name:
                 logging.info("Prayer time %s starting. Enforcing absolute network ban.", p_name)
                 self.daemon.prayer_ban_active = p_name
-                self.daemon.notifications_manager.play_sound("start")
+                self.daemon.notifications_manager.play_sound("prayer")
                 
                 if not getattr(self.daemon, "sni_proxy", None):
                     self.daemon.enforcement_manager.start_sni_proxy()
@@ -290,7 +294,10 @@ class WatchdogManager:
                 "Caught signal — setting re-enforce flag (deferred from handler)."
             )
             if self.daemon.state.session.active and not (
-                self.daemon.state.session.session_type == "pomodoro" and self.daemon.state.pomodoro.pomo_phase == "break"
+                self.daemon.state.session.session_type == "pomodoro" and (
+                    self.daemon.state.pomodoro.pomo_phase == "break" or 
+                    (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+                )
             ):
                 logging.info("Signal re-enforce: re-applying block rules.")
                 try:
@@ -440,9 +447,57 @@ class WatchdogManager:
             else:
                 self.daemon.enforcement_manager._enforce_block()
 
+    def _check_config_integrity(self):
+        self.daemon._wd_config_counter = getattr(self.daemon, "_wd_config_counter", 0) + 1
+        if self.daemon._wd_config_counter >= 20:  # Check every 5 seconds
+            self.daemon._wd_config_counter = 0
+            
+            # 1. Check ks_hash
+            from forcefocus.constants import KS_HASH_FILE, PERMA_BLOCK_FILE, LISTS_FILE
+            if getattr(self.daemon, "_cached_ks_hash", None):
+                try:
+                    current_mtime = KS_HASH_FILE.stat().st_mtime if KS_HASH_FILE.exists() else 0
+                    if current_mtime != getattr(self.daemon, "_cached_ks_hash_mtime", 0):
+                        logging.warning("CONFIG TAMPER DETECTED: ks_hash modified or deleted externally. Restoring.")
+                        # Restore from memory
+                        if KS_HASH_FILE.exists():
+                            subprocess.run(["chflags", "nouchg", str(KS_HASH_FILE)], capture_output=True)
+                        self.daemon._atomic_write_json(KS_HASH_FILE, self.daemon._cached_ks_hash)
+                        self.daemon._cached_ks_hash_mtime = KS_HASH_FILE.stat().st_mtime
+                        subprocess.run(["chflags", "uchg", str(KS_HASH_FILE)], capture_output=True)
+                except Exception as exc:
+                    logging.error("ks_hash integrity check failed: %s", exc)
+                    
+            # 2. Check perma_blocklist.json
+            cached_perma_mtime = getattr(self.daemon, "_cached_perma_mtime", None)
+            if hasattr(self.daemon, "perma_blocklist") and cached_perma_mtime is not None:
+                try:
+                    current_mtime = PERMA_BLOCK_FILE.stat().st_mtime if PERMA_BLOCK_FILE.exists() else 0
+                    if current_mtime != cached_perma_mtime:
+                        logging.warning("CONFIG TAMPER DETECTED: perma_blocklist.json modified or deleted externally. Restoring.")
+                        self.daemon.domains_manager._save_perma_state()
+                except Exception as exc:
+                    logging.error("perma_blocklist integrity check failed: %s", exc)
+
+            # 3. Check lists.json
+            cached_lists = getattr(self.daemon, "_cached_lists", None)
+            cached_lists_mtime = getattr(self.daemon, "_cached_lists_mtime", None)
+            if cached_lists is not None and cached_lists_mtime is not None and cached_lists_mtime != 0.0:
+                try:
+                    current_mtime = LISTS_FILE.stat().st_mtime if LISTS_FILE.exists() else 0
+                    if current_mtime != cached_lists_mtime:
+                        logging.warning("CONFIG TAMPER DETECTED: lists.json modified or deleted externally. Restoring.")
+                        self.daemon.domains_manager.save_lists(cached_lists)
+                except Exception as exc:
+                    logging.error("lists.json integrity check failed: %s", exc)
+
     def _check_dns_proxy(self):
         if self.daemon.state.session.mode in ("whitelist", "ban"):
-            if getattr(self.daemon, "dns_proxy", None) and not self.daemon.dns_proxy.is_alive() and not (self.daemon.state.session.session_type == "pomodoro" and self.daemon.state.pomodoro.pomo_phase == "break"):
+            is_break = self.daemon.state.session.session_type == "pomodoro" and (
+                self.daemon.state.pomodoro.pomo_phase == "break" or 
+                (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+            )
+            if getattr(self.daemon, "dns_proxy", None) and not self.daemon.dns_proxy.is_alive() and not is_break:
                 logging.warning("DNS Proxy thread died. Restarting.")
                 self.daemon.dns_proxy = LocalDNSProxy(self.daemon)
                 self.daemon.dns_proxy.start()

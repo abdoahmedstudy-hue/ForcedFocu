@@ -19,7 +19,10 @@ class FirewallMixin:
                 domains_to_resolve_blocks = set(self.daemon.perma_blocklist)
                 domains_to_resolve_whitelist = set()
     
-                is_break = self.daemon.state.session.session_type == "pomodoro" and self.daemon.state.pomodoro.pomo_phase == "break"
+                is_break = self.daemon.state.session.session_type == "pomodoro" and (
+                    self.daemon.state.pomodoro.pomo_phase == "break" or 
+                    (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+                )
                 if self.daemon.state.session.active and not is_break:
                     if self.daemon.state.session.mode == "blacklist":
                         domains_to_resolve_blocks.update(self.daemon.state.active_domains)
@@ -125,7 +128,10 @@ class FirewallMixin:
                         ]
                     )
 
-                    is_break = self.daemon.state.session.session_type == "pomodoro" and self.daemon.state.pomodoro.pomo_phase == "break"
+                    is_break = self.daemon.state.session.session_type == "pomodoro" and (
+                        self.daemon.state.pomodoro.pomo_phase == "break" or 
+                        (self.daemon.state.pomodoro.pomo_phase == "done" and getattr(self.daemon.state.pomodoro, "pomo_next_phase", "") == "break")
+                    )
                     if (self.daemon.state.session.active and self.daemon.state.session.mode in ("whitelist", "ban") and not is_break) or getattr(self.daemon, "prayer_ban_active", ""):
                         filters.extend(
                             [

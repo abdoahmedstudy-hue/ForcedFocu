@@ -16,7 +16,7 @@ class PomodoroMixin:
             phase_started = session_started + timedelta(seconds=self.daemon.state.pomodoro.pomo_phases_tracked_seconds)
     
             if self.daemon.state.pomodoro.pomo_phase == "focus":
-                self.daemon._record_pomodoro_phase("focus", self.daemon.state.pomodoro.pomo_focus_minutes, phase_started, now, True)
+                self.daemon.history_manager.record_pomodoro_phase("focus", self.daemon.state.pomodoro.pomo_focus_minutes, phase_started, now, True)
                 self.daemon.state.pomodoro.pomo_phases_tracked_seconds = self.daemon.state.pomodoro.pomo_phases_tracked_seconds + (self.daemon.state.pomodoro.pomo_focus_minutes * 60)
     
                 self.daemon.state.pomodoro.pomo_phase = "done"
@@ -40,7 +40,7 @@ class PomodoroMixin:
                     self.daemon.state.pomodoro.pomo_current_cycle
                 )
             elif self.daemon.state.pomodoro.pomo_phase == "break":
-                self.daemon._record_pomodoro_phase("break", self.daemon.state.pomodoro.pomo_break_minutes, phase_started, now, True)
+                self.daemon.history_manager.record_pomodoro_phase("break", self.daemon.state.pomodoro.pomo_break_minutes, phase_started, now, True)
                 self.daemon.state.pomodoro.pomo_phases_tracked_seconds = self.daemon.state.pomodoro.pomo_phases_tracked_seconds + (self.daemon.state.pomodoro.pomo_break_minutes * 60)
     
                 self.daemon.state.pomodoro.pomo_current_cycle += 1

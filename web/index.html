@@ -45,7 +45,9 @@
             </div>
           </div>
           <div class="header-actions">
-            <a href="settings.html" class="settings-btn" title="Sound Settings" aria-label="Sound Settings">⚙️</a>
+            <a href="settings.html" class="settings-btn" title="Settings" aria-label="Settings">
+              <img src="assets/settings.png" alt="Settings" style="width: 20px; height: 20px; object-fit: contain;">
+            </a>
             <div class="status-badge" id="statusBadge">
               <span class="status-dot"></span>
               <span class="status-text">Idle</span>
@@ -383,11 +385,10 @@
             </div>
 
             <!-- Prayer Countdown Card -->
+            <!-- Prayer Countdown Card -->
             <div class="card glass-card hidden" id="prayerCountdownCard">
               <div class="prayer-header">
-                <div class="prayer-icon-wrapper">
-                  <span class="prayer-icon">🕌</span>
-                </div>
+                <span class="prayer-icon"><img src="assets/mosque.png" alt="Mosque" style="width: 46px; height: 46px; object-fit: contain; margin-right: 4px;"></span>
                 <div class="prayer-title-group">
                   <h2 class="card-title flush" style="margin: 0; font-size: 1rem; color: var(--text-secondary);">Upcoming Prayer</h2>
                   <span class="prayer-name" id="prayerNameDisplay" style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-top: 4px; display: block;">—</span>
@@ -685,11 +686,11 @@
             <div class="detail-card-label">Expires At</div>
             <div class="detail-card-value" id="wdDetailExpiry">—</div>
           </div>
-          <div class="detail-card">
+          <div class="detail-card detail-card-full">
             <div class="detail-card-label">Groups</div>
             <div class="detail-card-value" id="wdDetailGroups">—</div>
           </div>
-          <div class="detail-card">
+          <div class="detail-card detail-card-full">
             <div class="detail-card-label">Domains</div>
             <div class="detail-card-value" id="wdDetailDomains">—</div>
           </div>
